@@ -1,0 +1,15 @@
+# ApiBuddy
+
+个人桌面 HTTP 请求模板工作台，当前为 Electrobun 2.0.1 + Cottontail + React + TypeScript。
+
+- README.md：功能、APIBUDDY_DIR、开发命令与边界。
+- docs/README.md：文档导航、对话归档后的接续入口与工作区状态快照。
+- docs/AGENT-CLI.md：服务 CLI 与通用 Markdown 接入。
+- AGENTS.md：开发约定。
+- docs/ARCHITECTURE.md：模块与通信、存储、请求生命周期。
+- docs/DECISIONS.md：选型历史。
+- docs/DEVELOPMENT.md：验证记录。
+- docs/ENGINEERING.md：失败恢复和已知限制。
+- docs/PRODUCT.md：实际产品范围。
+
+src/cli 为统一 apibuddy CLI，按服务和接口两级路由；src/main 负责本地文件、HTTP 和系统能力；src/mainview 为 WebView 界面；src/shared 为模型与 RPC 契约。默认服务模板在 ~/.apibuddy/templates，其他服务在 services/<UUID>/templates，可通过 APIBUDDY_DIR 自定义数据根目录。依次兼容 APIABC_DIR、APIX_DIR；未配置时优先使用已有 ~/.apibuddy，再依次沿用 ~/.apiabc、~/.apix，否则创建 ~/.apibuddy，不迁移数据。当前仓库为 ~/code/apibuddy，分支 dev2。当前未自动提交、推送或发布。
