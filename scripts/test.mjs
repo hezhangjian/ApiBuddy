@@ -8,7 +8,7 @@ try {
   const runtime = join(output, "cli-runtime.cjs");
   await build({ entryPoints: ["src/cli/runtime.ts"], bundle: true, platform: "node", format: "cjs", target: "node18", outfile: runtime });
   const files = [];
-  for (const name of ["core", "service-cli"]) {
+  for (const name of ["core", "service-cli", "workbench"]) {
     const file = join(output, `${name}.test.mjs`);
     await build({ entryPoints: [`tests/${name}.test.ts`], bundle: true, platform: "node", format: "esm", outfile: file });
     files.push(file);

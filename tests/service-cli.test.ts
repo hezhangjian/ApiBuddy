@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { ServiceStore } from "../src/main/service-store";
+import { environmentStore } from "../src/main/state-store";
 import { TemplateStore } from "../src/main/template-store";
 import { generateCli } from "../src/main/cli-generator";
 import { serviceCommands } from "../src/shared/cli-commands";
@@ -253,6 +254,36 @@ test("generated standalone CLI: discovery, overrides, real HTTP, isolation and l
       assert.equal((await run(["request", "INVALID", "/x"])).code, 2);
       const literal = await run(["request", "POST", "/unregistered", "--data", "literal {{ name }} $&"]);
       assert.equal(literal.code, 0); assert.equal(JSON.parse(literal.data.body).body, "literal {{ name }} $&");
+    });
+    await t.test("desktop environments drive live CLI requests and explicit options override environment defaults", async () => {
+      const store = environmentStore(services, service.id);
+      const profile = { id: randomUUID(), name: "staging", variables: [
+        { key: "base_url", value: baseUrl }, { key: "message", value: "from-profile" }, { key: "token", value: "profile-test-token" },
+      ] };
+      const first = store.save({ ...store.read(), profiles: [profile] });
+      const selectedBundle = generateCli(services, service.id, runtime, profile.id);
+      assert.equal(selectedBundle.environmentName, "staging");
+      assert(selectedBundle.commands.every((entry) => entry.example.endsWith("--environment 'staging'")));
+      assert(!selectedBundle.markdown.includes("profile-test-token"));
+      assert(selectedBundle.commands.every((entry) => !entry.example.includes("--env token=")));
+      assert.equal(readFileSync(selectedBundle.markdownPath, "utf8"), selectedBundle.markdown);
+      assert.throws(() => generateCli(services, service.id, runtime, randomUUID()), /不存在/);
+      const list = await run(["environments"]);
+      assert.equal(list.code, 0); assert.equal(list.data.environments[0].name, "staging"); assert(!list.text.includes("profile-test-token"));
+      const fromProfile = await run(["run", template.id, "--environment", "staging"]);
+      assert.equal(fromProfile.code, 0); assert.equal(JSON.parse(fromProfile.data.body).body, "updated from-profile");
+      assert.equal(JSON.parse(fromProfile.data.body).token, "profile-test-token");
+      const override = await run(["run", template.id, "--var", "message=explicit", "--environment=staging", "--env", "token=APIBUDDY_TEST_TOKEN"], { APIBUDDY_TEST_TOKEN: "explicit-token" });
+      assert.equal(JSON.parse(override.data.body).body, "updated explicit"); assert.equal(JSON.parse(override.data.body).token, "explicit-token");
+      assert.equal(services.templates(service.id).list().templates.find((item) => item.id === template.id)!.request.variables[1].value, "saved-value");
+      const count = received;
+      for (const args of [["run", template.id, "--environment", "missing"], ["run", template.id, "--environment"], ["run", template.id, "--environment", "staging", "--environment", "staging"]]) assert.equal((await run(args)).code, 2);
+      assert.equal(received, count);
+      store.save({ ...first, profiles: [{ ...profile, variables: [{ key: "base_url", value: baseUrl + "/env-prefix" }] }] });
+      const raw = await run(["request", "GET", "/echo", "--environment", "staging"]);
+      assert.equal(raw.code, 0); assert.equal(JSON.parse(raw.data.body).url, "/env-prefix/echo");
+      const literal = await run(["request", "POST", "/echo", "--data", "--environment"]);
+      assert.equal(literal.code, 0); assert.equal(JSON.parse(literal.data.body).body, "--environment");
     });
     await t.test("APIBUDDY_DIR selects the new service catalog without falling back to the original root", async () => {
       const alternate = join(root, "relocated"); mkdirSync(join(alternate, "services"), { recursive: true });

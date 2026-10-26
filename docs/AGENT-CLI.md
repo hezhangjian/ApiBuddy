@@ -29,6 +29,18 @@ apibuddy orders get-order --id 123 --dry-run    # 只预览，不发送
 
 需要 Node.js 18+。不用启动桌面，也不用安装项目依赖。不想改当前终端 PATH，可直接运行 `"$APIBUDDY_DIR/bin/apibuddy" orders get-order --id 123`。
 
+## 与桌面共用环境
+
+```sh
+apibuddy orders environments
+apibuddy orders get-order --environment local
+apibuddy orders get-order --environment staging --id 123
+```
+
+环境来自桌面“管理环境”，每次调用实时读取。优先级为模板默认值 → 所选环境 → 显式变量参数（按参数顺序）。`environments` 只列环境名与变量名，不输出环境值。选择不存在的环境会失败，不会回退到默认地址。
+
+桌面选择环境后打开“CLI 与 AI 接入”，面板和复制的 Markdown 会带上该环境；环境中已提供的变量不会再生成多余的占位参数。环境值本身不会写入 Markdown。`request` 使用所选环境的 `base_url`；其他认证头仍须显式传入，不从模板或环境自动注入。
+
 ## 没存模板的接口
 
 同一个 CLI 可以直接调用服务地址下的 HTTP 接口：
@@ -49,7 +61,8 @@ Agent 需要本机命令执行能力。Markdown 是给它看的工具说明，�
 
 ## 参数与结果
 
-- `--id 123` 或 `--id=123`：覆盖本次变量，未传时使用模板默认值。
+- `--id 123` 或 `--id=123`：覆盖本次变量，未传时使用所选环境或模板默认值。
+- `--environment local`：使用当前服务的环境，也接受环境 ID。
 - `--env token=MY_API_TOKEN`：从已有环境变量读取凭据。
 - `--vars-file /path/vars.json`：批量提供字符串键值；最大 64 KiB。
 - `--dry-run`：预览解析后的请求，不发送；预览可能含凭据。

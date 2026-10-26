@@ -3,44 +3,48 @@ import type { Metadata, Phase } from "../shared/rpc-schema";
 import { resolveRequest, type RequestDraft } from "../shared/templates";
 import { errorText, listen, rpc, unwrap } from "./rpc";
 export type ResponseState = { body: string; meta?: Metadata; phase: Phase | "idle" | "running"; elapsedMs: number; bytes: number; error?: string };
-const empty = (): ResponseState => ({ body: "", phase: "idle", elapsedMs: 0, bytes: 0 });
-export function useRequest(serviceId: string) {
-  const [response, setResponse] = useState<ResponseState>(empty);
-  const current = useRef<{ id: string; unsubscribe: () => void; timer: ReturnType<typeof setInterval> }>();
-  const clear = () => {
-    if (current.current) {
-      const { id, unsubscribe, timer } = current.current;
-      unsubscribe(); clearInterval(timer); current.current = undefined;
-      void rpc.request["abort-request"]({ requestId: id }).catch(() => {});
+export const emptyResponse = (): ResponseState => ({ body: "", phase: "idle", elapsedMs: 0, bytes: 0 });
+type Active = { id: string; unsubscribe: () => void; timer: ReturnType<typeof setInterval> };
+export function useRequests() {
+  const [responses, setResponses] = useState<Record<string, ResponseState>>({});
+  const current = useRef(new Map<string, Active>());
+  const update = (tabId: string, patch: Partial<ResponseState>) => setResponses((value) => ({ ...value, [tabId]: { ...(value[tabId] ?? emptyResponse()), ...patch } }));
+  const clear = (tabId: string) => {
+    const active = current.current.get(tabId);
+    if (active) {
+      active.unsubscribe(); clearInterval(active.timer); current.current.delete(tabId);
+      void rpc.request["abort-request"]({ requestId: active.id }).catch(() => {});
     }
   };
-  useEffect(() => clear, []);
-  const send = async (request: RequestDraft) => {
-    clear();
-    try { resolveRequest(request); } catch (error) { setResponse({ ...empty(), phase: "failed", error: errorText(error) }); return; }
-    const id = crypto.randomUUID();
-    const started = Date.now();
-    setResponse({ ...empty(), phase: "running" });
+  useEffect(() => () => { for (const tabId of current.current.keys()) clear(tabId); }, []);
+  const send = async (tabId: string, serviceId: string, request: RequestDraft) => {
+    clear(tabId);
+    try { resolveRequest(request); } catch (error) { update(tabId, { ...emptyResponse(), phase: "failed", error: errorText(error) }); return; }
+    const id = crypto.randomUUID(), started = Date.now();
+    update(tabId, { ...emptyResponse(), phase: "running" });
     const unsubscribe = listen(id, (event) => {
-      if (current.current?.id !== id) return;
-      if (event.type === "headers") setResponse((value) => ({ ...value, meta: event.meta }));
-      if (event.type === "chunk") setResponse((value) => ({ ...value, body: value.body + event.text }));
+      const active = current.current.get(tabId);
+      if (active?.id !== id) return;
+      if (event.type === "headers") update(tabId, { meta: event.meta });
+      if (event.type === "chunk") setResponses((value) => ({ ...value, [tabId]: { ...value[tabId], body: value[tabId].body + event.text } }));
       if (event.type === "end") {
-        clearInterval(current.current.timer); current.current = undefined;
-        setResponse((value) => ({ ...value, phase: event.phase, elapsedMs: event.elapsedMs, bytes: event.bytes, error: event.error }));
+        clearInterval(active.timer); active.unsubscribe(); current.current.delete(tabId);
+        update(tabId, { phase: event.phase, elapsedMs: event.elapsedMs, bytes: event.bytes, error: event.error });
       }
     });
-    const timer = setInterval(() => setResponse((value) => ({ ...value, elapsedMs: Date.now() - started })), 100);
-    current.current = { id, unsubscribe, timer };
+    const timer = setInterval(() => update(tabId, { elapsedMs: Date.now() - started }), 100);
+    current.current.set(tabId, { id, unsubscribe, timer });
     try { unwrap(await rpc.request["perform-request"]({ serviceId, requestId: id, request })); }
     catch (error) {
-      if (current.current?.id === id) { clear(); setResponse((value) => ({ ...value, phase: "failed", error: errorText(error) })); }
+      if (current.current.get(tabId)?.id === id) { clear(tabId); update(tabId, { phase: "failed", error: errorText(error) }); }
     }
   };
-  const cancel = async () => {
-    if (!current.current) return;
-    try { unwrap(await rpc.request["abort-request"]({ requestId: current.current.id })); }
-    catch (error) { setResponse((value) => ({ ...value, error: errorText(error) })); }
+  const cancel = async (tabId: string) => {
+    const active = current.current.get(tabId);
+    if (!active) return;
+    try { unwrap(await rpc.request["abort-request"]({ requestId: active.id })); }
+    catch (error) { update(tabId, { error: errorText(error) }); }
   };
-  return { response, send, cancel, reset: () => { clear(); setResponse(empty()); } };
+  const close = (tabId: string) => { clear(tabId); setResponses((value) => { const next = { ...value }; delete next[tabId]; return next; }); };
+  return { responses, send, cancel, close };
 }

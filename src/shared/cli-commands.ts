@@ -1,7 +1,7 @@
 import { referencedVariables, type SavedTemplate } from "./templates";
 
-const reservedCommands = new Set(["help", "list", "request", "run", "show"]);
-export const reservedOptions = new Set(["dry-run", "env", "help", "var", "vars-file"]);
+const reservedCommands = new Set(["help", "list", "request", "run", "show", "environments"]);
+export const reservedOptions = new Set(["dry-run", "env", "environment", "help", "var", "vars-file"]);
 export const shellQuote = (value: string) => `'${value.replace(/'/g, `'"'"'`)}'`;
 export type ServiceCommand = { name: string; template: SavedTemplate };
 
@@ -31,8 +31,8 @@ export function commandVariables(template: SavedTemplate) {
     hasDefault: template.request.variables.some((v) => v.key === key && v.value !== ""),
   }));
 }
-export function commandExample(executable: string, command: ServiceCommand): string {
-  const variables = commandVariables(command.template).filter((v) => v.referenced && !(v.name === "base_url" && v.hasDefault));
+export function commandExample(executable: string, command: ServiceCommand, supplied = new Set<string>()): string {
+  const variables = commandVariables(command.template).filter((v) => v.referenced && !supplied.has(v.name) && !(v.name === "base_url" && v.hasDefault));
   const flags = variables.map(({ name }) => {
     if (/token|secret|password|api[_.-]?key/i.test(name)) return `--env ${name}=${name.toUpperCase().replace(/[.-]/g, "_")}`;
     return reservedOptions.has(name) ? `--var ${shellQuote(`${name}=<${name}>`)}` : `--${name} ${shellQuote(`<${name}>`)}`;

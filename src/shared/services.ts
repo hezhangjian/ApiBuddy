@@ -4,7 +4,7 @@ export type ServiceInput = { name: string; slug: string; description: string; ba
 export type Service = ServiceInput & { schemaVersion: 1; id: string };
 export type ServiceCatalog = { services: Service[]; warnings: string[] };
 export type AgentBundle = {
-  cliPath: string; markdownPath: string; markdown: string; serviceId: string; setup: string;
+  cliPath: string; markdownPath: string; markdown: string; serviceId: string; setup: string; environmentName?: string;
   commands: { name: string; method: string; description: string; example: string }[]; warnings: string[];
 };
 export type CliConfig = { dataRoot: string };

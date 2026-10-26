@@ -8,6 +8,7 @@ import type { Result } from "../shared/templates";
 import { HttpClient } from "./http-client";
 import { ServiceStore } from "./service-store";
 import { generateCli } from "./cli-generator";
+import { environmentStore, workspaceStore } from "./state-store";
 
 let store: ServiceStore | undefined;
 const services = () => store ??= new ServiceStore();
@@ -34,9 +35,13 @@ const rpc = BrowserView.defineRPC<ApiBuddyRpcSchema>({
     }),
     "create-service": (input) => guard(() => services().create(input)),
     "delete-template": ({ serviceId, id, revision }) => guard(() => { services().templates(serviceId).delete(id, revision); return null; }),
-    "generate-cli": ({ serviceId }) => guard(() => generateCli(services(), serviceId, readFileSync(join(RESOURCES_FOLDER, "app/cli/runtime.cjs"), "utf8"))),
+    "generate-cli": ({ serviceId, environmentId }) => guard(() => generateCli(services(), serviceId, readFileSync(join(RESOURCES_FOLDER, "app/cli/runtime.cjs"), "utf8"), environmentId)),
     "list-services": () => guard(() => services().list()),
     "list-templates": ({ serviceId }) => guard(() => services().templates(serviceId).list()),
+    "load-environments": ({ serviceId }) => guard(() => environmentStore(services(), serviceId).read()),
+    "save-environments": ({ serviceId, data }) => guard(() => environmentStore(services(), serviceId).save(data)),
+    "load-workspace": () => guard(() => workspaceStore(services()).read()),
+    "save-workspace": ({ data }) => guard(() => workspaceStore(services()).save(data)),
     "perform-request": ({ serviceId, requestId, request }) => guard(() => { services().get(serviceId); client.start(requestId, request); return null; }),
     "save-template": ({ serviceId, template, id, revision }) => guard(() => services().templates(serviceId).save(template, id, revision)),
   } },

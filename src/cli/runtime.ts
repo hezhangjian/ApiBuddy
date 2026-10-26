@@ -7,6 +7,8 @@ import type { Metadata, RequestEvent } from "../shared/rpc-schema";
 import { HttpClient } from "../main/http-client";
 import { ServiceStore } from "../main/service-store";
 import { dataDirectory } from "../main/template-store";
+import { environmentStore } from "../main/state-store";
+import { applyEnvironment, type Environment } from "../shared/environments";
 
 declare const APIBUDDY_CLI_CONFIG: CliConfig;
 function output(value: unknown) { process.stdout.write(JSON.stringify(value) + "\n"); }
@@ -30,6 +32,7 @@ function printHelp(service: Service, templates: SavedTemplate[], warnings: strin
   if (!commands.length) lines.push("  尚未保存接口；可先使用下面的 request 命令。");
   lines.push("", "任意接口：", `  ${executable} request GET /path`, `  ${executable} request POST /path --data '{"name":"example"}' --header 'Content-Type: application/json'`,
     "", "<参数名> 换成实际值；默认值可省略。接口命令加 --help 查看参数，--dry-run 仅预览。",
+    `--environment 名称 使用桌面环境；${executable} environments 查看环境。`,
     "APIBUDDY_DIR 自定义存储目录。返回 JSON；需要 Node.js 18+。");
   if (warnings.length) lines.push("", ...warnings);
   process.stdout.write(lines.join("\n") + "\n");
@@ -40,7 +43,7 @@ function printEndpointHelp(service: Service, name: string, template: SavedTempla
     const flag = reservedOptions.has(variable.name) ? `--var ${variable.name}=<值>` : `--${variable.name} <值>`;
     lines.push(`  ${flag}  ${variable.hasDefault ? "可选，使用已保存默认值" : "无默认值"}`);
   }
-  lines.push("  --env 变量名=ENV_NAME  从环境变量读取凭据", "  --dry-run             预览，不发送请求");
+  lines.push("  --environment 名称   使用桌面保存的环境", "  --env 变量名=ENV_NAME  从环境变量读取凭据", "  --dry-run             预览，不发送请求");
   process.stdout.write(lines.join("\n") + "\n");
 }
 function keyValue(value: string): [string, string] {
@@ -48,8 +51,8 @@ function keyValue(value: string): [string, string] {
   if (separator < 1) throw new Error("选项需使用 key=value 格式");
   return [value.slice(0, separator), value.slice(separator + 1)];
 }
-function options(args: string[], template: SavedTemplate): { variables: Variable[]; dryRun: boolean } {
-  const values = new Map(template.request.variables.map((v) => [v.key, v.value]));
+function options(args: string[], template: SavedTemplate, environment?: Environment): { variables: Variable[]; dryRun: boolean } {
+  const values = new Map(applyEnvironment(template.request, environment).variables.map((v) => [v.key, v.value]));
   const allowed = new Set([...values.keys(), ...referencedVariables(template.request)]);
   const set = (key: string, value: unknown) => {
     if (!allowed.has(key)) throw new Error(`模板没有变量 ${key}`);
@@ -86,6 +89,24 @@ function options(args: string[], template: SavedTemplate): { variables: Variable
     }
   }
   return { variables: [...values].map(([key, value]) => ({ key, value })), dryRun };
+}
+function environmentOptions(args: string[], services: ServiceStore, serviceId: string): { flags: string[]; environment?: Environment } {
+  const flags: string[] = [];
+  let name: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--environment" || args[i].startsWith("--environment=")) {
+      if (name !== undefined) throw new Error("只可选择一个环境");
+      name = args[i] === "--environment" ? args[++i] : args[i].slice("--environment=".length);
+      if (!name || name.startsWith("--")) throw new Error("--environment 缺少环境名称");
+    } else {
+      flags.push(args[i]);
+      if (["--var", "--env", "--vars-file", "--data", "--header", "--query"].includes(args[i]) && i + 1 < args.length) flags.push(args[++i]);
+    }
+  }
+  if (name === undefined) return { flags };
+  const environment = environmentStore(services, serviceId).read().profiles.find((item) => item.name === name || item.id === name);
+  if (!environment) throw new Error(`没有环境 ${name}，执行 environments 查看可用环境`);
+  return { flags, environment };
 }
 function rawRequest(service: Service, args: string[]): { draft: RequestDraft; dryRun: boolean } {
   const [method, path, ...flags] = args;
@@ -158,9 +179,16 @@ async function main() {
     if (args.length) throw new Error("list 不接受额外参数");
     output({ ok: true, service: { id: service.id, name: service.name, slug: service.slug }, templates: commands.map((entry) => ({ ...summary(entry.template), command: entry.name })), warnings: library.warnings }); return;
   }
+  if (command === "environments") {
+    if (args.length) throw new Error("environments 不接受额外参数");
+    const data = environmentStore(services, service.id).read();
+    output({ ok: true, environments: data.profiles.map(({ id, name, variables }) => ({ id, name, variables: variables.map((row) => row.key) })) }); return;
+  }
   if (command === "request") {
     if (args.length === 1 && ["--help", "-h"].includes(args[0])) { printHelp(service, library.templates, library.warnings); return; }
-    const parsed = rawRequest(service, args); await execute(service, parsed.draft, parsed.dryRun); return;
+    const selected = environmentOptions(args, services, service.id);
+    const baseUrl = selected.environment?.variables.find((row) => row.key === "base_url")?.value ?? service.baseUrl;
+    const parsed = rawRequest({ ...service, baseUrl }, selected.flags); await execute(service, parsed.draft, parsed.dryRun); return;
   }
   // Keep older integrations working while the primary interface uses named commands.
   if (command === "run" || command === "show") {
@@ -175,12 +203,14 @@ async function main() {
       if (flags.length) throw new Error("show 不接受额外参数");
       output({ ok: true, serviceId: service.id, template: summary(template), timeoutMs: template.request.timeoutMs }); return;
     }
-    const parsed = options(flags, template); await execute(service, { ...template.request, variables: parsed.variables }, parsed.dryRun, template.id); return;
+    const selected = environmentOptions(flags, services, service.id);
+    const parsed = options(selected.flags, template, selected.environment); await execute(service, { ...template.request, variables: parsed.variables }, parsed.dryRun, template.id); return;
   }
   const entry = commands.find((entry) => entry.name === command);
   if (!entry) throw new Error(`没有接口 ${command}，执行 apibuddy ${service.slug} --help 查看全部接口`);
   if (args.length === 1 && ["--help", "-h"].includes(args[0])) { printEndpointHelp(service, entry.name, entry.template); return; }
-  const parsed = options(args, entry.template);
+  const selected = environmentOptions(args, services, service.id);
+  const parsed = options(selected.flags, entry.template, selected.environment);
   await execute(service, { ...entry.template.request, variables: parsed.variables }, parsed.dryRun, entry.template.id);
 }
 void main().catch((error: unknown) => {
