@@ -1,0 +1,26 @@
+{
+  "name": "ApiBuddy",
+  "cssVars": {
+    "theme": {"radius": "6px"},
+    "light": {
+      "background": "#ffffff", "foreground": "#252629",
+      "card": "#ffffff", "card-foreground": "#252629",
+      "popover": "#ffffff", "popover-foreground": "#252629",
+      "primary": "#e05d32", "primary-foreground": "#ffffff",
+      "secondary": "#f5f5f6", "secondary-foreground": "#252629",
+      "muted": "#f5f5f6", "muted-foreground": "#73777e",
+      "accent": "#fff0e9", "accent-foreground": "#bd4724",
+      "destructive": "#c33845", "border": "#e3e4e7", "input": "#dedfe3", "ring": "#e05d32"
+    },
+    "dark": {
+      "background": "#202124", "foreground": "#eeeff1",
+      "card": "#25262a", "card-foreground": "#eeeff1",
+      "popover": "#292b30", "popover-foreground": "#eeeff1",
+      "primary": "#ed784c", "primary-foreground": "#17181a",
+      "secondary": "#292b30", "secondary-foreground": "#eeeff1",
+      "muted": "#292b30", "muted-foreground": "#a4a7ae",
+      "accent": "#413028", "accent-foreground": "#ffab87",
+      "destructive": "#fa7b87", "border": "#3b3e44", "input": "#44474d", "ring": "#ed784c"
+    }
+  }
+}

@@ -1,5 +1,35 @@
 # 开发与验证
 
+## 2026-11-07：Windows 构建交接
+
+按用户要求，将当前 Rust/NSH 实现通过 `feat/nsh-postman-core` 功能分支交接到另一台电脑，保持 CLI 默认关闭。README 补充 Windows MSVC 前置条件、PowerShell 克隆与 release 构建命令、exe 路径和隔离数据目录设置。
+
+推送前修复共享核心中无条件引用 Unix 文件 API 的编译问题，权限设置仅在 Unix 启用；原子写入在重命名前关闭文件。用户目录改由标准库跨平台解析，Windows 使用 USERPROFILE/系统用户配置目录。路径测试改用系统临时目录；Windows 界面使用 Ctrl 快捷键提示及 Consolas 等宽字体。
+
+本机 macOS 的 `cargo check --locked`、核心 10 项测试、工作台 4 项测试及 release 构建通过。Windows 编译和原生交互尚未实测，需在目标电脑执行 README 中的步骤。此前 macOS 桌面交互验收记录见下文。
+
+## 2026-11-07：独立桌面 release 包，CLI 暂缓
+
+按用户最新要求，交付本机 macOS `.app`，CLI 保留为后续构想。桌面「CLI 与 AI」入口及创建服务时的命令预览已隐藏，相关接入代码通过默认关闭的 `cli-integration` feature 保留；默认构建只选择桌面，打包脚本只复制桌面程序并默认使用 release。
+
+- 原 debug 包共 85,013,310 字节（85.01 MB），其中桌面 73,744,704 字节、CLI 11,267,896 字节。新的 `dist/ApiBuddy.app` 共 31,490,550 字节（31.49 MB / 30.03 MiB），减少约 63%。使用现有 `opt-level = "s"`、Thin LTO、单代码生成单元及符号剥离，未删除桌面请求功能。
+- `cargo check`、核心 10 项测试、NSH 工作台 4 项测试、`cargo build --release -p apibuddy-app`、格式检查和 `git diff --check` 通过。
+- 使用最终包内同一 release 二进制及临时数据目录进行原生交互验证：顶部无 CLI 入口，新建服务无命令预览；实际发送本机回显请求收到 200，查询参数及中文响应正确。
+- 本轮交付仍为本地 macOS arm64 构建，未做 Developer ID 签名、公证或正式安装。以下 CLI 验证记录属于暂缓前的历史状态。
+
+## 2026-11-07：NSH 原生 Postman 核心工作台
+
+在 `feat/nsh-postman-core` 分支完成，本轮从 `dev` 切出并保留工作区已有的未提交 Rust 迁移。当前实现使用 Longbridge Native Shell v0.4.0，固定 Git revision；纯 Rust 模式由 AppKit 渲染。按用户授权，将本机 stable 工具链升级至 Rust 1.99.1，项目同时以 `rust-toolchain.toml` 固定该版本。
+
+- `cargo check`、`cargo test -p apibuddy-core`、`cargo test -p apibuddy-app --lib`、`cargo build -p apibuddy-app -p apibuddy-cli`、格式检查及 `git diff --check` 通过。共 14 项测试：6 项核心单元测试、4 项存储/真实 HTTP 集成测试、4 项 NSH 工作台交互测试。
+- 核心覆盖 cURL 转义与拒绝执行 shell/读取文件、环境合并与修订冲突、分块中文/emoji 解码、非 2xx 响应、取消、超时和 8 MiB 响应截断。工作台覆盖独立标签、保存重开、未保存关闭提示、对话框关闭后的状态存活、剪贴板导出、服务与环境，以及输入框获得焦点时的发送快捷键。
+- macOS arm64 原生窗口使用系统临时目录隔离数据与本机 42427 回显服务。实际创建服务、导入中文 JSON cURL、保存并重启后打开接口、添加中文查询参数、选择环境、Bearer 变量替换、POST 发送、慢请求取消均通过；回显确认方法、请求头、正文和参数。
+- 实际复制响应并粘贴回输入框，中文与 emoji 保持完整。桌面生成的独立 CLI 在仓库外执行同一保存接口，返回与桌面一致的环境解析结果；Agent Markdown 包含选择的环境，未展开环境值。
+- 最终打包二进制在原生窗口复核：URL 输入框保持焦点时按 ⌘Enter，收到 200 和预期查询参数。修复了 NSH 默认快捷键策略在文本输入框中不触发发送的问题，并加入回归测试。
+- `python3 scripts/package-macos.py` 生成 `dist/ApiBuddy.app`；桌面入口名为 `apibuddy-app`，CLI 名为 `apibuddy`，避免 macOS 大小写不敏感文件系统上相互覆盖。使用包内相同二进制完成隔离原生验证，未做正式安装、签名、公证或跨平台验收。
+
+保留隔离体验窗口及本机回显服务。源码未提交、推送或合并到 main。标签草稿与历史目前仅会话保留；完整边界见 [ENGINEERING](ENGINEERING.md)。以下记录属于旧版历史，不代表当前 NSH 分支的能力或测试结果。
+
 ## 2026-10-26：dev 版本提交
 
 按用户确认，本轮提交将多标签与草稿恢复、桌面/CLI 共用环境、cURL 导入导出、紧凑可调工作台和长响应阅读器一并纳入 dev。提交沿用下方已通过的 43 项自动测试、类型检查、stable 构建和原生交互验收结果；本次整理仅补充交付记录，没有再次修改运行代码。main 保持原基线，下方“未提交”等表述属于各轮开发时的历史状态。

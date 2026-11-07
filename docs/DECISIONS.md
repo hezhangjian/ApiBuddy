@@ -1,5 +1,19 @@
 # 技术决策
 
+## 2026-11-07：先交付独立桌面应用，CLI 暂缓
+
+按用户最新要求，先提供本机可直接运行的 macOS `.app`。CLI 与 Agent Markdown 保留为后续构想，桌面入口默认关闭，创建服务时不再展示命令，安装包不携带 CLI。相关源码通过默认关闭的 `cli-integration` feature 保留，未删除。默认构建只选择桌面；交付打包默认使用 release，避免把含调试符号的开发包当作最终体积。
+
+## 2026-11-07：NSH 原生 Postman 核心工作台
+
+按用户要求从 dev 切出 `feat/nsh-postman-core`，保留工作区已有未提交的 Rust 重写。桌面改用 Longbridge Native Shell（NSH）v0.4.0，固定提交 `e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3`；纯 Rust 模式关闭平台默认 js feature，macOS 使用 AppKit。此决定覆盖下方 GPUI 选型。固定 Rust 1.99.1 满足 NSH 使用的标准库 API，用户另授权更新本机 Rust 工具链。
+
+复用 apibuddy-core 的数据格式、存储、环境合并、请求执行及 CLI，不迁移用户库。主要范围为多标签、服务集合、参数/头/正文、Bearer 认证、环境编辑、响应查看、cURL 与会话历史；标签与历史暂不落盘，不宣称完整复刻 Postman。
+
+## 2026-10-30：重写为 Rust + GPUI
+
+用户明确要求将 ApiBuddy-dev 从 Electrobun/React/TypeScript 重写为 Rust + GPUI。沿用 `~/code/apix-gpui` 验证过的 GPUI Kit 0.7.1、reqwest、Tokio 组合；桌面无 WebView。共享逻辑放入 `apibuddy-core`，桌面与 CLI 分别为 `apibuddy-app` / `apibuddy-cli`。数据目录与 JSON 模板/服务格式保持兼容，避免迁移用户库。首版对齐核心闭环（服务、接口、发送、CLI/Agent），多标签、环境编辑 UI、cURL、JSON 树等后续在 Rust 栈上补齐。
+
 ## 2026-10-26：优先分配窗口给请求与响应
 
 用户反馈无用区域过多、核心编辑空间不足。工作台改为固定工具栏与可调分区，移除大标题、装饰文案和卡片外边距；窗口不再整页滚动。低频操作和说明按需展开，发送、保存、环境切换始终可见。布局偏好只使用本机 WebView 存储，不混入接口或环境文件；不可用时退回默认布局，不阻止请求调试。保留原有功能与数据格式，不新增 UI 依赖。

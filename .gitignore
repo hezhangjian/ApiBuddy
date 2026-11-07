@@ -7,10 +7,12 @@
 !.vscode/extensions.json
 **.iml
 
-# Node
-**/node_modules
+# Rust
+/target/
+**/*.rs.bk
 
-# Dependencies and generated files
+# Legacy Node / Electrobun (removed stack; ignore leftovers)
+**/node_modules
 .cottontail-tmp/
 .hutch/
 artifacts/
@@ -18,4 +20,7 @@ build/
 dist/
 node_modules/
 *.tsbuildinfo
-/target/
+
+# Local packaging
+*.app/
+*.dmg

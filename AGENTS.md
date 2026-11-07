@@ -1,18 +1,17 @@
 # ApiBuddy 开发约定
 
-- 仓库采用 main、dev 双 worktree：~/code/apibuddy/ApiBuddy-main 检出 main，~/code/apibuddy/ApiBuddy-dev 检出 dev。日常开发在 ApiBuddy-dev，验证通过并经用户要求后再合并到 main。
-- 用户于 2026-10-26 将原 dev 重命名为 dev-old、原 dev2 重命名为 dev；dev-old 保留历史实现，不单独检出。当前 dev 承接 2026-10-23 从 ApiX-dev 带入的 Electrobun 实现、新建接口修复和产品思考。不要自动同步或修改旧 ApiX 仓库。
-- ApiBuddy 是桌面 API 客户端：创建服务 → 构筑并保存接口模板 → 桌面发送 → 生成统一 CLI → 复制 Markdown 给 AI Agent。服务 ID 由用户输入，命令形式为 apibuddy <服务> <接口>，不是一个服务一个可执行文件。
-- 产品和安装包名 ApiBuddy；包名、CLI 为 apibuddy；数据目录变量 APIBUDDY_DIR，默认 ~/.apibuddy。兼容 APIABC_DIR、APIX_DIR（按此顺序）；无显式配置时依次选已有 ~/.apibuddy、~/.apiabc、~/.apix，否则创建 ~/.apibuddy。不自动搬动或合并用户数据。
-- 技术栈为 Electrobun 2.0.1、Cottontail、React、TypeScript、Vite；系统 WebView，不捆绑 Chromium。不要自行切换框架。
+当前功能分支为 `feat/nsh-postman-core`（2026-11-07 按用户要求从 dev 切出）；下方双 worktree 约定为仓库基线。
+
+- 仓库采用 main、dev 双 worktree：`~/code/ApiBuddy/ApiBuddy-main` 检出 main，`~/code/ApiBuddy/ApiBuddy-dev` 检出 dev。日常开发在 ApiBuddy-dev，验证通过并经用户要求后再合并到 main。
+- ApiBuddy 当前聚焦独立桌面 API 客户端：创建服务 → 编辑请求 → 发送 → 查看响应 → 保存接口。CLI 与 AI Agent 接入按用户最新要求暂缓，源码保留但入口默认隐藏、安装包不包含 CLI。
+- 产品和安装包名 ApiBuddy；包名、CLI 为 `apibuddy`；数据目录变量 `APIBUDDY_DIR`，默认 `~/.apibuddy`。兼容 `APIABC_DIR`、`APIX_DIR`（按此顺序）。
+- **本分支按用户要求改用 Rust 1.99.1、Native Shell（NSH）0.4.0、reqwest、Tokio。纯 Rust 模式，无 WebView、QuickJS、Node/Electrobun。** NSH 依赖固定 Git revision；不要将参考仓库并入本仓库。
 - 开发前阅读 README.md、docs/README.md、docs/DECISIONS.md 和 docs/ENGINEERING.md。
-- 主进程在 src/main，界面在 src/mainview，共享模型和 RPC 契约在 src/shared。桌面文件访问只放主进程；独立 Node CLI 在 src/cli，复用存储和请求逻辑。
-- 保留 hutch.lock，冻结安装用 hutch run install；其他包操作使用 pnpm，不使用 npm/yarn。不编辑生成的 .hutch/devkit。
-- 运行 hutch run check、hutch run test、hutch run build；构建和测试输出放临时目录，不提交缓存和产物。
-- 桌面输入、剪贴板和渲染需实际交互验证；打包成功不等于端到端通过，流式文本不代表 SSE 解析。
-- 环境存储为服务目录下的 environments.json，恢复工作区为数据根目录下的 workspace.json；沿用版本校验、写锁和原子写入。桌面与 CLI 共用环境合并规则，显式 CLI 参数优先于环境，环境优先于模板默认值。cURL 只能作为文本解析，不执行 shell 或读取引用文件。
-- 外部文件和 RPC 参数需运行时验证；保持请求身份、成功/取消/超时/错误终态和资源清理明确。
-- 响应只按数据展示，不执行远端 HTML；日志、截图和测试不包含真实凭据。
+- Workspace：`apibuddy-core`（共享域与存储）、`apibuddy-app`（NSH 原生桌面）、`apibuddy-cli`（保留的 CLI 构想）。默认只构建桌面；桌面 `cli-integration` feature 默认关闭，未经用户要求不重新开放入口。
+- 存储规则沿用：版本校验、写锁、原子写入；模板 ≤ 2 MiB；响应上限 8 MiB；桌面与 CLI 共用 resolve / 环境合并规则。
+- 运行 `cargo check`、`cargo test -p apibuddy-core`、`cargo test -p apibuddy-app --lib`。交付使用 `cargo build --release -p apibuddy-app` 与 `python3 scripts/package-macos.py`。构建产物在 `target/`，本地应用包在 `dist/`，不提交。
+- 桌面输入、剪贴板和渲染需实际交互验证；打包成功不等于端到端通过。
+- 响应只按数据展示，不执行远端 HTML；日志和测试不包含真实凭据。
 - 文档默认中文，代码注释英文。模块职责清楚，避免无实际用途的抽象。
-- 未经明确要求，不提交、推送、批量迁移、删除、上传或发布。本次 worktree 调整只涉及本地分支和目录；远端分支重命名、Git 推送和 npm 发布需用户明确要求。项目 private 配置保留，CLI 由桌面生成。
-- 如需提交，使用 Conventional Commits 和 git commit -s。
+- 未经明确要求，不提交、推送、批量迁移、删除、上传或发布。
+- 如需提交，使用 Conventional Commits 和 `git commit -s`。

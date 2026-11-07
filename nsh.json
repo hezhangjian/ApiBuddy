@@ -1,0 +1,8 @@
+{
+  "name": "ApiBuddy",
+  "id": "io.github.hezhangjian.apibuddy",
+  "rust": "crates/apibuddy-app",
+  "root": "App",
+  "theme": "crates/apibuddy-app/theme.json",
+  "appearance": "system"
+}

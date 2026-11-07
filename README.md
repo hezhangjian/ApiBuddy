@@ -1,105 +1,85 @@
 # ApiBuddy
 
-把 API 保存成可复用的请求模板，再交给终端和 AI Agent 调用。桌面使用 Electrobun，代码使用 TypeScript。
+用 Rust + **Native Shell（NSH）0.4.0** 构建的桌面 API 客户端，在桌面编辑、发送、查看响应并保存请求。
+
+本分支为 `feat/nsh-postman-core`，从 `dev` 切出并保留原有未提交的 Rust 迁移。NSH 使用纯 Rust 模式，macOS 由 AppKit 原生渲染；不使用 WebView、Node 或 QuickJS。
+
+## 运行
+
+项目通过 `rust-toolchain.toml` 固定 Rust 1.99.1；首次构建需要下载工具链及 Cargo 依赖。
 
 ```sh
-apibuddy orders get-order --id 123
-apibuddy orders create-order --name 手机
-apibuddy users get-user --id 42
+cargo run -p apibuddy-app
 ```
 
-一个 `apibuddy` 入口，第一层是服务 ID，第二层是接口。新增、修改接口保存后，CLI 立即读取最新内容。
-
-## 先跑起来
-
-本机需要 Hutch、Node.js 18+ 和 pnpm。当前开发分支为 `dev`，采用以下 Git worktree 布局：
-
-- `~/code/apibuddy/ApiBuddy-main`：`main` 分支，保留已确认的基线；目前仍为初始化版本。
-- `~/code/apibuddy/ApiBuddy-dev`：`dev` 分支，日常开发，原名 `dev2`。
-
-旧 `dev` 已重命名为 `dev-old`，保留历史实现，不单独检出。开发改动验证通过后，再按用户要求合并到 `main`。
+需要独立测试数据时：
 
 ```sh
-cd ~/code/apibuddy/ApiBuddy-dev
-hutch run install
-hutch run dev
+APIBUDDY_DIR="$(mktemp -d -t apibuddy-demo)" cargo run -p apibuddy-app
 ```
 
-启动桌面后：
-
-1. 点击「新建服务」：名称填「订单服务」，服务 ID 填 `orders`，地址填你的 API 地址。
-2. 点击「新建接口」：名称填 `get-order`，方法选 GET，路径填 `/orders/{{id}}`。创建后立即保存并打开，`id` 自动成为变量。
-3. 在「变量」中填写 `id`，点击「发送」查看响应；⌘/Ctrl+S 保存修改。
-4. 点击「CLI 与 AI 接入」，生成 CLI 并复制面板中的初始化命令，然后调用接口。
-
-没有现成 API 时，可在另一个终端运行本机回显服务：
+启动本机回显服务，便于不依赖外部 API 验证：
 
 ```sh
-cd ~/code/apibuddy/ApiBuddy-dev
-node scripts/fixture-server.mjs
+python3 scripts/fixture-server.py
 ```
 
-服务地址填 `http://127.0.0.1:42427`。GET `/orders/{{id}}` 和 POST `/orders` 都会回显方法、路径和正文，方便先体验完整流程。按 Ctrl+C 停止回显服务。
+在桌面新建服务：名称「订单服务」、ID `orders`、基础地址 `http://127.0.0.1:42427`。新建请求后填写名称和 URL（例如 `{{base_url}}/echo`），编辑 Params / Headers / Body，再发送并保存。
 
-## 连续调试工作流
+## 在 Windows 构建
 
-- **紧凑工作台**：URL、发送、保存和环境固定在顶部，正文区域独立滚动。拖动中间分隔线调整比例，右上角切换左右/上下排列；侧栏可收起，⌘/Ctrl+K 展开并搜索。窄窗口自动上下排列。两栏右上角可单独放大，Esc 恢复分栏；⌘/Ctrl+B 收放侧栏。
+使用 Windows 10 1809+（建议 Windows 11），安装 Git、[Rust MSVC 工具链](https://www.rust-lang.org/tools/install) 和 Visual Studio Build Tools 的「使用 C++ 的桌面开发」工作负载（含 Windows SDK）。本项目不启用 NSH 的 JavaScript/QuickJS 功能，不需要 Node。
 
-- **多标签**：同时打开不同服务的请求，后台请求继续执行，响应保留在各自标签中。`⌘/Ctrl+T` 新建草稿、`⌘/Ctrl+W` 关闭标签、`⌘/Ctrl+K` 搜索接口。
-- **自动保护草稿**：标签、未保存编辑和当前环境写入本机工作区，重启后恢复；以底部“草稿已保存在本机”为准。关闭有改动的标签时可保存、放弃或取消。
-- **环境**：在右上角“环境”添加 local、staging 等配置，环境变量覆盖同名模板默认值。选择环境后，发送、预览、复制 cURL 和 AI 接入命令使用同一环境。
-- **cURL**：从左侧导入 POSIX/bash 格式的 cURL，预览后在新标签编辑。支持 URL、方法、请求头、文本/JSON 请求体、Cookie 文本和超时；不执行命令、不读取 `@文件`，不支持的选项会明确报错。顶部「•••」中的「复制 cURL」包含当前环境解析后的实际值，另存副本和删除也在此处。
-- **响应定位**：格式化 JSON、按需展开 JSON 树、查找文本、使用 `/data/items/0/id` 形式的字段路径提取并复制结果；Raw 保留原始文本。响应栏的「查找」「字段」按需展开，⌘/Ctrl+F 聚焦响应查找，Enter / Shift+Enter 跳到下一处/上一处。JSON 语法着色、换行开关和流式跟随辅助长响应阅读；接口描述通过顶部「说明」编辑。
+在 PowerShell 中执行：
 
-环境和恢复草稿与模板一样以本机 JSON 明文保存。响应只保留在当前运行的标签中，不写入恢复文件。
+```powershell
+git clone --branch feat/nsh-postman-core https://github.com/hezhangjian/ApiBuddy.git
+cd ApiBuddy
+cargo build --locked --release -p apibuddy-app
+.\target\release\apibuddy-app.exe
+```
 
-## 终端与 AI Agent
+`rust-toolchain.toml` 会选择 Rust 1.99.1，首次编译需要联网获取工具链和固定版本依赖。生成的桌面程序为 `target\release\apibuddy-app.exe`，无需构建 CLI，也不运行 macOS 打包脚本。默认数据目录为 `%USERPROFILE%\.apibuddy`；隔离测试可先设置 `$env:APIBUDDY_DIR = Join-Path $env:TEMP ('apibuddy-demo-' + [guid]::NewGuid())`。
 
-在接入面板生成后，按面板显示的实际目录配置终端：
+若 `windows` crate 编译提示栈溢出，可设置 `$env:RUST_MIN_STACK = '268435456'` 后重试。Windows 的编译与实际交互仍待 Windows 机器验证；后端要求参考 [NSH Windows 文档](https://github.com/longbridge/nsh/blob/e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3/docs/dev/windows.md)。
+
+## 桌面能力
+
+- 服务集合、名称/URL/方法搜索、请求保存与另存副本。
+- 最多 20 个独立请求标签，切换保留草稿和响应；关闭未保存标签有保存提示。
+- 七种 HTTP 方法；可启停的查询参数和请求头；原始 JSON、Text、URL-encoded Form 正文及 JSON 格式化。
+- Bearer Token 表单；其他认证可通过请求头配置。模板变量与每服务环境（环境覆盖模板默认值）。
+- 真实 HTTP 请求、流式文本、取消、超时、状态码、耗时、字节数；最多 8 个并发请求、8 MiB 响应。
+- Pretty / Raw / 响应头，复制完整响应；请求与响应区域可拖动调整。
+- 常用 POSIX cURL 文本导入和实际请求导出。解析不会执行 shell，也不会读取 cURL 引用的文件。
+- 本次会话最近 50 条请求历史，点击恢复为可编辑草稿。
+
+快捷键：⌘/Ctrl+Enter 发送或取消，⌘/Ctrl+S 保存，⌘/Ctrl+T 新建，⌘/Ctrl+W 关闭标签，⌘/Ctrl+K 搜索，⌘/Ctrl+B 收放侧栏，Esc 取消请求。
+
+标签、未保存草稿、响应和历史目前只保留在会话中；重启后从集合重新打开已保存接口。不含团队协作、脚本断言、OAuth 向导、OpenAPI/Postman Collection 导入、multipart/文件上传、WebSocket、持久历史和秘密管理。实现的是 Postman 风格的 HTTP 调试核心工作流。
+
+## 保留构想
+
+CLI 与 AI Agent 接入暂缓：源码保留，桌面入口默认关闭，安装包不包含 CLI。以后再决定是否启用；[原有设计说明](docs/AGENT-CLI.md) 仅作参考。
+
+## 数据与开发
+
+数据目录为 `APIBUDDY_DIR`，默认 `~/.apibuddy`；兼容 `APIABC_DIR`、`APIX_DIR`。沿用服务、模板、环境 JSON 格式，读取现有数据而不迁移。模板和环境采用版本校验、写锁和原子写入。
+
+| Crate | 职责 |
+| --- | --- |
+| `apibuddy-core` | 请求/服务/环境、存储、HTTP、cURL、CLI |
+| `apibuddy-app` | NSH 原生工作台 |
+| `apibuddy-cli` | 保留的 CLI 构想，不默认构建或打包 |
 
 ```sh
-export APIBUDDY_DIR="$HOME/.apibuddy"
-export PATH="$APIBUDDY_DIR/bin:$PATH"
-
-apibuddy --help                       # 查看全部服务
-apibuddy orders --help                # 查看该服务全部已保存接口
-apibuddy orders get-order --id 123
-apibuddy orders environments                  # 查看该服务环境
-apibuddy orders get-order --id 123 --environment local
-apibuddy orders get-order --id 123 --dry-run
-apibuddy orders request GET /orders   # 调用尚未保存模板的路径
+cargo check
+cargo test -p apibuddy-core
+cargo test -p apibuddy-app --lib
+cargo build --release -p apibuddy-app
+python3 scripts/package-macos.py
 ```
 
-示例接口需先在桌面创建。变量直接对应 `--参数 值`，支持 URL、参数、请求头和正文中的 `{{变量}}`；中文接口名也能直接调用。`request METHOD /path` 使用服务地址及路径前缀，不自动发现远端接口或继承其他模板的认证头。
+HTTP 测试监听本机随机端口；桌面、存储测试使用系统临时目录。构建产物在 `target/`，本地安装包在 `dist/ApiBuddy.app`。打包默认使用 release 的体积优化、Thin LTO 和符号剥离；仅调试时显式传入 `python3 scripts/package-macos.py debug`。
 
-「复制给 AI Agent」会生成含初始化命令、服务全部已保存接口和示例的 Markdown。粘贴到任意 Agent 会读取的文档即可；Agent 需要本机命令执行能力和 Node.js 18+。CLI 独立运行，无需桌面常驻或项目依赖，不自动修改 Agent 或 shell 配置。
-
-[完整 CLI 说明](docs/AGENT-CLI.md)
-
-## 存储
-
-`APIBUDDY_DIR` 默认是 `~/.apibuddy`；可设置绝对路径、相对路径或 `~/`。例如：
-
-```sh
-APIBUDDY_DIR="$HOME/ApiBuddy-data" hutch run dev
-```
-
-每个服务独立保存 JSON 接口模板。统一入口为 `$APIBUDDY_DIR/bin/apibuddy`，运行时为 `$APIBUDDY_DIR/cli/apibuddy.cjs`。
-
-兼容旧配置 `APIABC_DIR`、`APIX_DIR`，优先级为 `APIBUDDY_DIR > APIABC_DIR > APIX_DIR`。三者均未设置时，依次沿用已有 `~/.apibuddy`、`~/.apiabc`、`~/.apix`，否则使用 `~/.apibuddy`；不会搬动或合并数据。升级后重新生成 CLI，并复制新说明。CLI 未显式配置目录时使用生成时绑定的目录。
-
-变量默认值、请求头和正文以 JSON 明文保存在本机。临时凭据可用 `--env token=MY_API_TOKEN` 读取，不回写模板。
-
-## 开发与范围
-
-```sh
-hutch run check      # TypeScript 检查
-hutch run test       # 存储、服务隔离、CLI 和真实 HTTP 测试
-hutch run build      # 本地安装包，输出路径显示在终端
-```
-
-构建和测试产物位于系统临时目录。`dev` 每次构建快照后启动，无 watch/HMR。项目保留 `private: true`；目前 CLI 由桌面生成，不依赖 npm 发布。
-
-当前已实现服务创建、模板新建/保存/复制/删除/搜索、多标签与草稿恢复、服务环境、cURL 导入与复制、JSON 树/字段提取/搜索、请求取消/超时和通用 Agent Markdown。macOS arm64 已验证；尚无服务编辑/删除、秘密存储、OpenAPI 导入、持久请求历史、正式签名或公证。流式响应仅展示文本，单次接收上限 8 MiB。
-
-[设计与工程文档](docs/README.md) · [产品范围](docs/PRODUCT.md) · [决策记录](docs/DECISIONS.md)
+[设计与工程文档](docs/README.md)
