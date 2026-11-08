@@ -1,79 +1,103 @@
-use apibuddy_core::{Result, protocol::Command};
+use apibuddy_core::{
+    Error, Result,
+    host::Host,
+    protocol::{Command, Events},
+};
 use serde::de::DeserializeOwned;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::mpsc};
+use tokio::sync::oneshot;
+
+type Job = Box<dyn FnOnce(&mut Host) + Send>;
 
 #[derive(Clone)]
 pub struct Backend {
-    #[cfg(not(target_arch = "wasm32"))]
-    host: std::rc::Rc<std::cell::RefCell<apibuddy_core::host::Host>>,
+    worker: std::result::Result<mpsc::Sender<Job>, String>,
 }
 
 impl Backend {
-    pub fn new(_root: PathBuf) -> Self {
-        Self {
-            #[cfg(not(target_arch = "wasm32"))]
-            host: std::rc::Rc::new(std::cell::RefCell::new(apibuddy_core::host::Host::new(
-                _root,
-            ))),
-        }
+    pub fn new(root: PathBuf) -> Self {
+        let (sender, jobs) = mpsc::channel::<Job>();
+        let worker = std::thread::Builder::new()
+            .name("apibuddy-storage".into())
+            .spawn(move || {
+                let mut host = Host::new(root);
+                for job in jobs {
+                    job(&mut host);
+                }
+                // Dropping Host cancels its remaining network operations.
+            })
+            .map(|_| sender)
+            .map_err(|error| format!("无法启动本地工作线程：{error}"));
+        Self { worker }
     }
 
-    pub async fn call<T: DeserializeOwned>(&self, command: Command) -> Result<T> {
-        #[cfg(not(target_arch = "wasm32"))]
-        let value = self.host.borrow_mut().call(command)?;
-        #[cfg(target_arch = "wasm32")]
-        let value = web::call(command).await?;
-        Ok(serde_json::from_value(value)?)
+    async fn execute<T: Send + 'static>(
+        &self,
+        action: impl FnOnce(&mut Host) -> Result<T> + Send + 'static,
+    ) -> Result<T> {
+        let worker = self.worker.as_ref().map_err(|e| Error::msg(e.clone()))?;
+        let (reply, result) = oneshot::channel();
+        worker
+            .send(Box::new(move |host| {
+                let _ = reply.send(action(host));
+            }))
+            .map_err(|_| Error::msg("本地工作线程已停止，请重启应用"))?;
+        result
+            .await
+            .map_err(|_| Error::msg("本地任务中断，请重试"))?
+    }
+
+    pub async fn call<T: DeserializeOwned + Send + 'static>(&self, command: Command) -> Result<T> {
+        // File I/O and conversion both stay off the UI thread.
+        self.execute(move |host| Ok(serde_json::from_value(host.call(command)?)?))
+            .await
+    }
+
+    pub async fn poll(&self, operations: Vec<u64>) -> Result<Events> {
+        // Response chunks cross threads as owned Rust values, without a JSON round trip.
+        self.execute(move |host| Ok(host.poll(&operations))).await
     }
 }
 
 pub fn mac_shortcuts() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        web::is_mac()
-    }
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        cfg!(target_os = "macos")
-    }
+    cfg!(target_os = "macos")
 }
 
 pub fn copy_text(text: String) {
-    #[cfg(not(target_arch = "wasm32"))]
     nsh_core::prelude::set_clipboard(text);
-    #[cfg(target_arch = "wasm32")]
-    web::copy_text(&text);
 }
 
-#[cfg(target_arch = "wasm32")]
-mod web {
+#[cfg(test)]
+mod tests {
     use super::*;
-    use wasm_bindgen::prelude::*;
+    use std::time::Duration;
 
-    #[wasm_bindgen(
-        inline_js = "export function apiCall(text) { return window.apibuddy.call(text); } export function apiCopy(text) { window.apibuddy.copy(text); } export function apiMac() { return /Mac/.test(navigator.platform); }"
-    )]
-    extern "C" {
-        #[wasm_bindgen(js_name = apiCall, catch)]
-        fn api_call(text: &str) -> std::result::Result<js_sys::Promise, JsValue>;
-        #[wasm_bindgen(js_name = apiMac)]
-        pub fn is_mac() -> bool;
-        #[wasm_bindgen(js_name = apiCopy)]
-        pub fn copy_text(text: &str);
-    }
-
-    pub async fn call(command: Command) -> Result<serde_json::Value> {
-        let error = |v: JsValue| {
-            apibuddy_core::Error::msg(v.as_string().unwrap_or_else(|| "本地后端连接失败".into()))
-        };
-        let promise = api_call(&serde_json::to_string(&command)?).map_err(error)?;
-        let value = wasm_bindgen_futures::JsFuture::from(promise)
+    #[tokio::test]
+    async fn queued_storage_work_does_not_block_the_calling_thread() {
+        let root = std::env::temp_dir().join(format!("apibuddy-worker-{}", uuid::Uuid::new_v4()));
+        let backend = Backend::new(root.clone());
+        let caller = std::thread::current().id();
+        let (started, ready) = oneshot::channel();
+        let (release, wait) = mpsc::channel();
+        let job = tokio::spawn(async move {
+            backend
+                .execute(move |_| {
+                    assert_ne!(std::thread::current().id(), caller);
+                    let _ = started.send(());
+                    wait.recv_timeout(Duration::from_secs(3)).unwrap();
+                    Ok(42u32)
+                })
+                .await
+                .unwrap()
+        });
+        tokio::time::timeout(Duration::from_secs(2), ready)
             .await
-            .map_err(error)?;
-        let text = value
-            .as_string()
-            .ok_or_else(|| apibuddy_core::Error::msg("本地后端返回无效数据"))?;
-        let result: std::result::Result<serde_json::Value, String> = serde_json::from_str(&text)?;
-        result.map_err(apibuddy_core::Error::msg)
+            .unwrap()
+            .unwrap();
+        // This task can continue while the worker is blocked on its own operation.
+        assert!(!job.is_finished());
+        release.send(()).unwrap();
+        assert_eq!(job.await.unwrap(), 42);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

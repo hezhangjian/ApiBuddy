@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build, install and reopen the macOS development apps at stable Dock paths."""
+"""Build, install and reopen the native macOS app at its stable Dock path."""
 import argparse
 import fcntl
 import json
@@ -81,10 +81,10 @@ def pin_to_dock(bundle, name, identifier):
     return True
 
 
-def prepare(variant, profile, temporary, data):
-    name = "ApiBuddy" if variant == "native" else "ApiBuddy WebView"
+def prepare(profile, temporary, data):
+    name = "ApiBuddy"
     dev_name = name + " Dev"
-    run(sys.executable, ROOT / "scripts/package-macos.py", profile, variant)
+    run(sys.executable, ROOT / "scripts/package-macos.py", profile)
     bundle = temporary / (dev_name + ".app")
     shutil.copytree(ROOT / "dist" / (name + ".app"), bundle)
     info_path = bundle / "Contents/Info.plist"
@@ -125,15 +125,14 @@ def install(staged, destination, identifier, temporary):
 
 def main():
     parser = argparse.ArgumentParser(description="构建、更新 ~/Applications 中的开发版，固定到 Dock 并重启。重启前请保存草稿。")
-    parser.add_argument("variant", nargs="?", choices=["native", "webview", "both"], default="native")
+    parser.add_argument("variant", nargs="?", choices=["native"], default="native", help="仅维护原生桌面入口")
     parser.add_argument("--release", action="store_true", help="使用 release 构建；默认 debug，便于增量开发")
-    parser.add_argument("--data-dir", type=Path, default=Path.home() / ".apibuddy-dev", help="两版共享的开发数据目录，会写入应用包供 Dock 启动使用")
+    parser.add_argument("--data-dir", type=Path, default=Path.home() / ".apibuddy-dev", help="开发数据目录，会写入应用包供 Dock 启动使用")
     args = parser.parse_args()
     if sys.platform != "darwin":
         parser.error("此命令只用于 macOS；其他平台请使用 README 中的 cargo 命令")
     data = args.data_dir.expanduser().resolve()
     profile = "release" if args.release else "debug"
-    variants = ["native", "webview"] if args.variant == "both" else [args.variant]
     applications = Path.home() / "Applications"
     applications.mkdir(exist_ok=True)
     # Serialize rebuild/restart operations, including different worktrees.
@@ -143,31 +142,22 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError("另一个 ApiBuddy 开发构建正在运行。") from None
-        print(f"构建 {', '.join(variants)} ({profile})；开发数据：{data}", flush=True)
-        # Complete every requested build before touching installed/running apps.
-        for variant in variants:
-            if variant == "native":
-                command = ["cargo", "build", "--locked", "-p", "apibuddy-app"]
-                if args.release:
-                    command.append("--release")
-                run(*command)
-            else:
-                run(sys.executable, ROOT / "scripts/build-webview.py", "--profile", profile)
+        print(f"构建原生版 ({profile})；开发数据：{data}", flush=True)
+        # Finish building before touching the installed/running app.
+        command = ["cargo", "build", "--locked", "-p", "apibuddy-app"]
+        if args.release:
+            command.append("--release")
+        run(*command)
         with tempfile.TemporaryDirectory(prefix="apibuddy-dev-install-") as directory:
             temporary = Path(directory)
-            prepared = [prepare(v, profile, temporary, data) for v in variants]
-            installed = []
-            changed = False
-            for staged, name, identifier in prepared:
-                destination = applications / staged.name
-                install(staged, destination, identifier, temporary)
-                changed = pin_to_dock(destination, name, identifier) or changed
-                installed.append(destination)
+            staged, name, identifier = prepare(profile, temporary, data)
+            destination = applications / staged.name
+            install(staged, destination, identifier, temporary)
+            changed = pin_to_dock(destination, name, identifier)
             if changed:
                 subprocess.run(["/usr/bin/killall", "-u", str(os.getuid()), "Dock"], check=False)
-            for destination in installed:
-                run("/usr/bin/open", destination)
-                print(f"已更新并打开：{destination}", flush=True)
+            run("/usr/bin/open", destination)
+            print(f"已更新并打开：{destination}", flush=True)
 
 
 if __name__ == "__main__":

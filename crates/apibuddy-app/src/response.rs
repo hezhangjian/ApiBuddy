@@ -24,6 +24,11 @@ pub struct ResponseView {
 }
 
 impl ResponseView {
+    pub fn clear_inputs(self) {
+        self.query.set(String::new());
+        self.pointer.set(String::new());
+    }
+
     pub fn new() -> Self {
         Self {
             section: signal(0),
@@ -536,6 +541,7 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
             move || editor_focused.get() && store.dialog.get() == Dialog::None,
             move || {
                 // The editor has its own keymap. Keep workbench search/cancel keys available while it owns focus.
+                crate::workbench::register_request_keys(store);
                 on_key_with(
                     "escape",
                     KeyOptions {

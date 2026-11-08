@@ -13,7 +13,7 @@ use std::{
 struct Sandbox(PathBuf);
 impl Sandbox {
     fn new() -> Self {
-        Self(std::env::temp_dir().join(format!("apibuddy-bridge-{}", uuid::Uuid::new_v4())))
+        Self(std::env::temp_dir().join(format!("apibuddy-host-{}", uuid::Uuid::new_v4())))
     }
 }
 impl Drop for Sandbox {
@@ -22,19 +22,19 @@ impl Drop for Sandbox {
     }
 }
 
-// Round-trip every command through JSON, just like the WebView boundary.
+// Check command serialization independently of the desktop renderer.
 fn call<T: serde::de::DeserializeOwned>(host: &mut Host, command: Command) -> T {
     let encoded = serde_json::to_string(&command).unwrap();
     serde_json::from_value(host.call(serde_json::from_str(&encoded).unwrap()).unwrap()).unwrap()
 }
 
 #[test]
-fn both_hosts_read_the_same_files_and_detect_stale_revisions() {
+fn two_hosts_read_the_same_files_and_detect_stale_revisions() {
     let root = Sandbox::new();
     let mut native = Host::new(root.0.clone());
-    let mut web = Host::new(root.0.clone());
+    let mut second = Host::new(root.0.clone());
     let mut input = new_template();
-    input.name = "跨入口保存".into();
+    input.name = "多实例保存".into();
     let saved: SavedTemplate = call(
         &mut native,
         Command::Save {
@@ -45,15 +45,15 @@ fn both_hosts_read_the_same_files_and_detect_stale_revisions() {
         },
     );
     let library: Library = call(
-        &mut web,
+        &mut second,
         Command::Load {
             service: "default".into(),
         },
     );
     assert_eq!(library.templates, vec![saved.clone()]);
-    input.name = "WebView 修改".into();
+    input.name = "另一个实例修改".into();
     let updated: SavedTemplate = call(
-        &mut web,
+        &mut second,
         Command::Save {
             service: "default".into(),
             input: input.clone(),
@@ -80,15 +80,16 @@ fn both_hosts_read_the_same_files_and_detect_stale_revisions() {
     );
     assert_eq!(library.templates, vec![updated]);
     assert!(
-        web.call(Command::Load {
-            service: "../../outside".into()
-        })
-        .is_err()
+        second
+            .call(Command::Load {
+                service: "../../outside".into()
+            })
+            .is_err()
     );
 }
 
 #[test]
-fn unacknowledged_request_events_are_retained_and_native_http_has_no_cors_requirement() {
+fn unacknowledged_request_events_are_retained_until_polled() {
     let root = Sandbox::new();
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/echo", listener.local_addr().unwrap());

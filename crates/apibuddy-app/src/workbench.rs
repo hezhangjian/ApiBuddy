@@ -11,56 +11,26 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
     let search = signal(String::new());
     let navigation = signal(0);
     let search_ref = element_ref();
-    for (key, action) in [
-        ("mod+enter", 0),
-        ("mod+s", 1),
-        ("mod+t", 2),
-        ("mod+w", 3),
-        ("escape", 4),
-        ("mod+b", 5),
-        ("mod+k", 6),
-    ] {
-        let options = KeyOptions {
-            when: nsh_core::keymap::When::Always,
-            ..Default::default()
-        };
-        on_key_with(key, options, move |_| {
-            if store.dialog.get_untracked() != Dialog::None {
-                return;
-            }
-            match action {
-                0 => {
-                    if let Some(tab) = store.current() {
-                        store.send(tab);
-                    }
+    register_request_keys(store);
+    for (key, action) in [("mod+b", 0), ("mod+k", 1)] {
+        on_key_with(
+            key,
+            KeyOptions {
+                when: nsh_core::keymap::When::Always,
+                ..Default::default()
+            },
+            move |_| {
+                if store.dialog.get_untracked() != Dialog::None {
+                    return;
                 }
-                1 => {
-                    if let Some(tab) = store.current() {
-                        store.save(tab, false);
-                    }
-                }
-                2 => store.new_request(),
-                3 => {
-                    if let Some(tab) = store.current() {
-                        store.request_close(tab);
-                    }
-                }
-                4 => {
-                    if let Some(tab) = store.current() {
-                        if tab.response_view.search_open.get_untracked() {
-                            tab.response_view.search_open.set(false);
-                        } else {
-                            store.cancel(tab);
-                        }
-                    }
-                }
-                5 => sidebar.update(|v| *v = !*v),
-                _ => {
+                if action == 0 {
+                    sidebar.update(|v| *v = !*v);
+                } else {
                     sidebar.set(true);
                     search_ref.focus();
                 }
-            }
-        });
+            },
+        );
     }
     let filtered = computed(move || {
         let query = search.get().to_lowercase();
@@ -455,4 +425,68 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 }).text_size(px(11.0))),
         )
         .child(dialogs::dialogs(store))
+}
+
+// Bind after a focused code editor so its editing keymap cannot consume workbench commands.
+pub fn register_request_keys(store: Workbench) {
+    for (key, action) in [
+        ("mod+enter", 0),
+        ("mod+s", 1),
+        ("mod+t", 2),
+        ("mod+w", 3),
+        ("escape", 4),
+        ("mod+shift+d", 5),
+        ("ctrl+tab", 6),
+        ("ctrl+shift+tab", 7),
+    ] {
+        on_key_with(
+            key,
+            KeyOptions {
+                when: nsh_core::keymap::When::Always,
+                ..Default::default()
+            },
+            move |_| {
+                if store.dialog.get_untracked() != Dialog::None {
+                    return;
+                }
+                match action {
+                    2 => store.new_request(),
+                    6 => store.switch_tab(1),
+                    7 => store.switch_tab(-1),
+                    _ => {
+                        if let Some(tab) = store.current() {
+                            match action {
+                                0 => store.send(tab),
+                                1 => store.save(tab, false),
+                                3 => store.request_close(tab),
+                                4 => {
+                                    if tab.response_view.search_open.get_untracked() {
+                                        tab.response_view.search_open.set(false);
+                                    } else {
+                                        store.cancel(tab);
+                                    }
+                                }
+                                5 => store.duplicate(tab),
+                                _ => unreachable!(),
+                            }
+                        }
+                    }
+                }
+            },
+        );
+    }
+    for index in 0..9 {
+        on_key_with(
+            &format!("mod+{}", index + 1),
+            KeyOptions {
+                when: nsh_core::keymap::When::Always,
+                ..Default::default()
+            },
+            move |_| {
+                if store.dialog.get_untracked() == Dialog::None {
+                    store.select_tab(index);
+                }
+            },
+        );
+    }
 }

@@ -26,6 +26,7 @@ pub struct RequestTab {
     pub response_view: crate::response::ResponseView,
     pub section: Signal<usize>,
     pub content_version: Signal<u64>,
+    pub body_wrap: Signal<bool>,
 }
 
 impl PartialEq for RequestTab {
@@ -151,12 +152,7 @@ impl Workbench {
     }
 
     fn client() -> String {
-        if cfg!(target_arch = "wasm32") {
-            "webview"
-        } else {
-            "native"
-        }
-        .into()
+        "native".into()
     }
 
     fn snapshot(self) -> Workspace {
@@ -418,7 +414,7 @@ impl Workbench {
         input: TemplateInput,
         saved: Option<(String, u64)>,
         environment: Option<String>,
-    ) {
+    ) -> Option<RequestTab> {
         if let Some((ref template_id, _)) = saved {
             let existing = self.tabs.with_untracked(|tabs| {
                 tabs.iter()
@@ -432,13 +428,13 @@ impl Workbench {
             });
             if let Some(tab) = existing {
                 self.activate(tab);
-                return;
+                return Some(tab);
             }
         }
         if self.tabs.with_untracked(Vec::len) >= 20 {
             self.notice
                 .set("最多打开 20 个请求，请先关闭一个标签".into());
-            return;
+            return None;
         }
         // Signals belong to the workbench owner, even when invoked from a temporary dialog.
         let tab = self.owner.run(|| RequestTab {
@@ -452,9 +448,70 @@ impl Workbench {
             response_view: crate::response::ResponseView::new(),
             section: signal(0),
             content_version: signal(0),
+            body_wrap: signal(true),
         });
         self.tabs.update(|tabs| tabs.push(tab));
         self.activate(tab);
+        Some(tab)
+    }
+
+    pub fn duplicate(self, source: RequestTab) {
+        let mut input = source.draft.get_untracked();
+        let original_name = input.name.clone();
+        for number in 1.. {
+            let suffix = if number == 1 {
+                " 副本".into()
+            } else {
+                format!(" 副本 {number}")
+            };
+            let mut end = original_name.len().min(120 - suffix.len());
+            while !original_name.is_char_boundary(end) {
+                end -= 1;
+            }
+            input.name = format!("{}{suffix}", &original_name[..end]);
+            if !self.tabs.with_untracked(|tabs| {
+                tabs.iter()
+                    .any(|t| t.draft.with_untracked(|d| d.name == input.name))
+            }) {
+                break;
+            }
+        }
+        if let Some(tab) = self.open(
+            source.service.get_untracked(),
+            input,
+            None,
+            source.environment.get_untracked(),
+        ) {
+            tab.section.set(source.section.get_untracked());
+            tab.body_wrap.set(source.body_wrap.get_untracked());
+            self.notice.set("已复制为独立草稿，保存时创建新接口".into());
+        }
+    }
+
+    pub fn switch_tab(self, direction: isize) {
+        let selected = self.tabs.with_untracked(|tabs| {
+            let at = tabs
+                .iter()
+                .position(|t| t.id == self.active.get_untracked())?;
+            tabs.get((at as isize + direction).rem_euclid(tabs.len() as isize) as usize)
+                .copied()
+        });
+        if let Some(tab) = selected {
+            self.activate(tab);
+        }
+    }
+
+    pub fn select_tab(self, index: usize) {
+        let selected = self.tabs.with_untracked(|tabs| {
+            if index == 8 {
+                tabs.last().copied()
+            } else {
+                tabs.get(index).copied()
+            }
+        });
+        if let Some(tab) = selected {
+            self.activate(tab);
+        }
     }
 
     pub fn new_request(self) {
@@ -553,6 +610,11 @@ impl Workbench {
             self.saving.with(|ids| {
                 ids.remove(&tab.id);
             });
+            if !self.tabs.with_untracked(|tabs| tabs.iter().any(|t| t.id == tab.id)) {
+                if service == self.selected_service.get_untracked() { self.reload_service(); }
+                if let Err(error) = result { self.notice.set(format!("已关闭请求的保存失败：{error}")); }
+                return;
+            }
             match result {
                 Ok(saved) => {
                     // An asynchronous save must not overwrite edits made while it was pending.
@@ -592,6 +654,12 @@ impl Workbench {
     }
 
     pub fn close(self, id: u64) {
+        let index = self
+            .tabs
+            .with_untracked(|tabs| tabs.iter().position(|t| t.id == id));
+        let closed = self
+            .tabs
+            .with_untracked(|tabs| tabs.iter().find(|t| t.id == id).copied());
         let operation = self
             .running
             .with(|running| running.remove(&id).and_then(|r| r.operation));
@@ -608,14 +676,25 @@ impl Workbench {
         }
         self.tabs.update(|tabs| tabs.retain(|tab| tab.id != id));
         if self.active.get_untracked() == id {
-            let last = self.tabs.with_untracked(|tabs| tabs.last().copied());
-            if let Some(last) = last {
-                self.activate(last);
+            let neighbor = self.tabs.with_untracked(|tabs| {
+                tabs.get(index.unwrap_or(0).min(tabs.len().saturating_sub(1)))
+                    .copied()
+            });
+            if let Some(neighbor) = neighbor {
+                self.activate(neighbor);
             } else {
                 self.new_request();
             }
         }
         self.dialog.set(Dialog::None);
+        // Signals belong to the workbench lifetime. Release large buffers once their view
+        // is gone, so repeatedly closing 8 MiB responses cannot retain them until quit.
+        if let Some(tab) = closed {
+            tab.response.set(Response::default());
+            tab.draft.set(new_template());
+            tab.baseline.set(new_template());
+            tab.response_view.clear_inputs();
+        }
     }
 
     pub fn send(self, tab: RequestTab) {
@@ -682,14 +761,17 @@ impl Workbench {
                             .call::<()>(Command::Cancel { operation, discard })
                             .await;
                     }
-                    self.notice.set("请求已发送".into());
+                    if self.running.with(|r| r.contains_key(&tab.id)) {
+                        self.notice.set("请求已发送".into());
+                    }
                 }
                 Err(e) => {
                     let failed = self.running.with(|r| r.remove(&tab.id));
-                    if let Some(mut failed) = failed {
-                        failed.history.summary = e.to_string();
-                        self.record_history(failed.history);
-                    }
+                    let Some(mut failed) = failed else {
+                        return;
+                    };
+                    failed.history.summary = e.to_string();
+                    self.record_history(failed.history);
                     tab.response.update(|r| {
                         r.running = false;
                         r.message = e.to_string();
@@ -732,10 +814,7 @@ impl Workbench {
             let operations = self
                 .running
                 .with(|r| r.values().filter_map(|r| r.operation).collect());
-            let result = self
-                .backend()
-                .call::<Events>(Command::Poll { operations })
-                .await;
+            let result = self.backend().poll(operations).await;
             self.polling.with(|p| *p = false);
             match result {
                 Ok(events) => self.apply_events(events),
@@ -911,6 +990,7 @@ impl Workbench {
     }
 
     pub fn copy_curl(self, tab: RequestTab) {
+        self.notice.set("正在解析当前请求…".into());
         let service = tab.service.with(|s| s.id.clone());
         let input = tab.draft.get_untracked();
         let environment = tab.environment.get_untracked();

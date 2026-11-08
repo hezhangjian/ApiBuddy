@@ -4,8 +4,5 @@
   "rust": "crates/apibuddy-app",
   "root": "App",
   "theme": "crates/apibuddy-app/theme.json",
-  "appearance": "system",
-  "web": {
-    "host": "web/host.js"
-  }
+  "appearance": "system"
 }

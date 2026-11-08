@@ -22,6 +22,7 @@ nsh-base.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 uuid.workspace = true
+tokio.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 nsh-platform-macos.workspace = true
@@ -35,9 +36,3 @@ nsh-platform-windows.workspace = true
 [dev-dependencies]
 nsh-engine.workspace = true
 nsh-testing.workspace = true
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "=0.2.130"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-uuid = { workspace = true, features = ["js"] }

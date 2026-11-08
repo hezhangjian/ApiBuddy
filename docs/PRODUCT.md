@@ -10,7 +10,7 @@
 
 新建临时请求 → 输入完整 URL → 编辑 Params / Headers / Body / Authorization → 发送/取消 → 查看响应 → 保存到集合。创建集合不是发送的前置步骤，首次保存时选择或新建集合；编辑请求名称再保存可重命名。
 
-多标签草稿自动保存与恢复；本地历史跨重启保留最近 50 条，响应正文不落盘。提供 JSON/Text/Form、Bearer/Basic/API Key、环境变量、cURL、Pretty/Raw/响应头和复制。原生与 WebView 入口共用已有 Rust UI 和后端，先验证本机 macOS 的个人 HTTP 调试流程。CLI/AI、插件、云同步和完整 OAuth 不进入本轮范围。当前边界见 [ENGINEERING](ENGINEERING.md)。
+多标签草稿自动保存与恢复；本地历史跨重启保留最近 50 条，响应正文不落盘。提供 JSON/Text/Form、Bearer/Basic/API Key、环境变量、cURL、Pretty/Raw/响应头和复制。当前专注 NSH 原生入口，验证本机 macOS 的个人 HTTP 调试流程；双版本基线已存档。正文使用代码编辑器，格式化/压缩支持撤销与错误定位；请求标签可复制，支持键盘切换。CLI/AI、插件、云同步和完整 OAuth 不进入本轮范围。当前边界见 [ENGINEERING](ENGINEERING.md)。
 
 响应支持当前视图的文本查找、大小写开关、命中循环定位，以及 JSON Pointer 字段查看和复制。查找只扫描实际显示的前 256 KiB，JSON 字段则从完整响应提取；查看模式和查找条件随当前会话中的标签保留。
 

@@ -13,10 +13,6 @@ thiserror.workspace = true
 url.workspace = true
 uuid.workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 encoding_rs.workspace = true
 reqwest.workspace = true
 tokio.workspace = true
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-uuid = { workspace = true, features = ["js"] }

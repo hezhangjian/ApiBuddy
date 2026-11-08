@@ -1,4 +1,4 @@
-//! Local capability owner. The browser never executes HTTP or chooses file paths.
+//! Local storage and HTTP operation owner.
 use crate::protocol::{Catalog, Command, Events, Library};
 use crate::{
     Engine, EnvironmentStore, Error, Event, Operation, Result, ServiceStore, apply_environment,
@@ -93,28 +93,30 @@ impl Host {
                 }
                 Value::Null
             }
-            Command::Poll { operations } => {
-                let mut batches: Events = Vec::new();
-                let mut completed = Vec::new();
-                for (id, (_, receiver)) in &self.running {
-                    if !operations.contains(id) {
-                        continue;
-                    }
-                    // Bound each turn so streaming requests cannot monopolize the UI bridge.
-                    let events: Vec<_> = receiver.try_iter().take(32).collect();
-                    if events.iter().any(|e| matches!(e, Event::End(_))) {
-                        completed.push(*id);
-                    }
-                    if !events.is_empty() {
-                        batches.push((*id, events));
-                    }
-                }
-                for id in completed {
-                    self.running.remove(&id);
-                }
-                to_value(batches)?
-            }
+            Command::Poll { operations } => to_value(self.poll(&operations))?,
         })
+    }
+
+    pub fn poll(&mut self, operations: &[u64]) -> Events {
+        let mut batches: Events = Vec::new();
+        let mut completed = Vec::new();
+        for (id, (_, receiver)) in &self.running {
+            if !operations.contains(id) {
+                continue;
+            }
+            // Bound each turn so streaming requests cannot monopolize the event consumer.
+            let events: Vec<_> = receiver.try_iter().take(32).collect();
+            if events.iter().any(|e| matches!(e, Event::End(_))) {
+                completed.push(*id);
+            }
+            if !events.is_empty() {
+                batches.push((*id, events));
+            }
+        }
+        for id in completed {
+            self.running.remove(&id);
+        }
+        batches
     }
 
     fn resolve(

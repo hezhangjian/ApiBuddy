@@ -3,9 +3,7 @@ use nsh_base::{
 };
 use nsh_core::prelude::*;
 
-pub const MONO: &str = if cfg!(target_arch = "wasm32") {
-    "monospace"
-} else if cfg!(target_os = "windows") {
+pub const MONO: &str = if cfg!(target_os = "windows") {
     "Consolas"
 } else {
     "Menlo"

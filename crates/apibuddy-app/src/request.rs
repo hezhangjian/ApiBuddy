@@ -4,6 +4,7 @@ use crate::{
 };
 use apibuddy_core::{Authentication, METHODS, Pair, Variable};
 use nsh_base::SelectItem;
+use nsh_base::editor::{Editor, EditorApi, EditorPosition, EditorSelection, editor};
 use nsh_core::prelude::*;
 
 pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
@@ -77,7 +78,11 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 )
                 .child(ui::action("另存", move || {
                     store.save(tab, true);
-                })),
+                }))
+                .child(
+                    ui::action("复制", move || store.duplicate(tab))
+                        .accessibility_label("复制请求标签"),
+                ),
         )
         .child(
             view()
@@ -331,6 +336,72 @@ fn pairs(tab: RequestTab, kind: usize) -> impl IntoElement {
 
 fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
     let form_mode = computed(move || tab.draft.with(|d| d.request.form.is_some()));
+    let code = component_ref::<Editor>();
+    let focused = signal(false);
+    let json_mode = computed(move || {
+        tab.draft.with(|d| {
+            d.request.headers.iter().any(|h| {
+                h.enabled
+                    && h.key.eq_ignore_ascii_case("content-type")
+                    && h.value.to_ascii_lowercase().contains("json")
+            })
+        })
+    });
+    let format = move |compact| {
+        let source = tab.draft.with_untracked(|d| d.request.body.clone());
+        match serde_json::from_str::<serde_json::Value>(&source) {
+            Ok(json) => {
+                let value = if compact {
+                    serde_json::to_string(&json)
+                } else {
+                    serde_json::to_string_pretty(&json)
+                }
+                .expect("JSON value serializes");
+                if let Some(editor) = code.api::<EditorApi>() {
+                    batch(|| {
+                        // NSH 0.4 set_value retains old byte offsets. Collapse first so
+                        // a shorter/differently indented Unicode document has valid selections.
+                        editor.set_selections(vec![EditorSelection::caret(EditorPosition::new(
+                            0, 0,
+                        ))]);
+                        editor.set_value(value);
+                        editor.focus();
+                    });
+                }
+                store.notice.set(
+                    if compact {
+                        "JSON 已压缩，可撤销"
+                    } else {
+                        "JSON 已格式化，可撤销"
+                    }
+                    .into(),
+                );
+            }
+            Err(error) => {
+                store.notice.set(format!(
+                    "JSON 格式错误：第 {} 行，第 {} 列 · {}",
+                    error.line(),
+                    error.column(),
+                    error
+                ));
+                if let Some(editor) = code.api::<EditorApi>() {
+                    let line = error.line().saturating_sub(1);
+                    let text = source.lines().nth(line).unwrap_or_default();
+                    let mut offset = error.column().saturating_sub(1).min(text.len());
+                    while !text.is_char_boundary(offset) {
+                        offset -= 1;
+                    }
+                    let position = EditorPosition::new(
+                        line as u32,
+                        text[..offset].encode_utf16().count() as u32,
+                    );
+                    editor.set_selections(vec![EditorSelection::caret(position)]);
+                    editor.reveal_position(position, true);
+                    editor.focus();
+                }
+            }
+        }
+    };
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -364,17 +435,21 @@ fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
                     set_body_type(tab, "application/x-www-form-urlencoded")
                 }))
                 .child(
-                    ui::action("格式化", move || {
-                        match serde_json::from_str::<serde_json::Value>(
-                            &tab.draft.with_untracked(|d| d.request.body.clone()),
-                        ) {
-                            Ok(json) => tab.draft.update(|d| {
-                                d.request.body =
-                                    serde_json::to_string_pretty(&json).unwrap_or_default()
-                            }),
-                            Err(error) => store.notice.set(format!("JSON 格式错误：{error}")),
-                        }
-                    })
+                    ui::action("格式化", move || format(false)).disabled(move || form_mode.get()),
+                )
+                .child(ui::action("压缩", move || format(true)).disabled(move || form_mode.get()))
+                .child(
+                    ui::action(
+                        move || {
+                            if tab.body_wrap.get() {
+                                "换行 ✓"
+                            } else {
+                                "换行"
+                            }
+                        },
+                        move || tab.body_wrap.update(|v| *v = !*v),
+                    )
+                    .accessibility_label("切换正文自动换行")
                     .disabled(move || form_mode.get()),
                 ),
         )
@@ -382,15 +457,49 @@ fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
             if form_mode.get() {
                 pairs(tab, 2).into_element()
             } else {
-                ui::editor(
-                    "请求正文",
-                    move || tab.draft.with(|d| d.request.body.clone()),
-                    move |value| tab.draft.update(|d| d.request.body = value.into()),
-                )
-                .placeholder("输入 JSON 或文本正文")
-                .into_element()
+                cleanup(move || focused.set(false));
+                view()
+                    .test_id("请求正文")
+                    .flex_1()
+                    .min_h(px(80.0))
+                    .child(
+                        editor()
+                            .component_ref(&code)
+                            .value(move || {
+                                SharedString::from(tab.draft.with(|d| d.request.body.clone()))
+                            })
+                            .on_change(move |value: &SharedString| {
+                                tab.draft.update(|d| d.request.body = value.to_string())
+                            })
+                            .on_focus(move || focused.set(true))
+                            .on_blur(move || focused.set(false))
+                            .language(move || {
+                                Some(SharedString::from(if json_mode.get() {
+                                    "json"
+                                } else {
+                                    "text"
+                                }))
+                            })
+                            .accessibility_label("请求正文")
+                            .soft_wrap(tab.body_wrap)
+                            .font_family(ui::MONO)
+                            .font_size(px(13.0))
+                            .line_height(px(20.0))
+                            .tab_size(2u32)
+                            .placeholder("输入 JSON 或文本正文")
+                            .flex_1()
+                            .min_h(px(80.0)),
+                    )
+                    .into_element()
             }
         }))
+        .child(when(
+            move || focused.get() && store.dialog.get() == crate::state::Dialog::None,
+            move || {
+                crate::workbench::register_request_keys(store);
+                view()
+            },
+        ))
 }
 
 pub fn set_header(tab: RequestTab, name: &str, value: &str) {

@@ -13,12 +13,9 @@ fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
 
-/// The shared Rust workbench, rendered natively or in WebAssembly.
+/// The native Rust desktop workbench.
 #[component]
 pub fn App() -> impl IntoElement {
-    #[cfg(target_arch = "wasm32")]
-    let directory: apibuddy_core::Result<std::path::PathBuf> = Ok(Default::default());
-    #[cfg(not(target_arch = "wasm32"))]
     let directory = apibuddy_core::data_directory();
     match directory {
         Ok(root) => workbench::workbench(state::Workbench::new(root)).into_element(),

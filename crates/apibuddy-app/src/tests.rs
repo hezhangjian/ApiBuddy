@@ -53,6 +53,27 @@ fn fill(app: &mut Headless, name: &str, value: &str) {
     app.type_text(name, value).unwrap();
 }
 
+fn copy_curl(app: &mut Headless) {
+    app.press("复制 cURL").unwrap();
+    app.wait_for("已复制当前环境下的 cURL（含请求头与实际变量值）")
+        .unwrap();
+}
+
+fn body_text(app: &mut Headless) -> String {
+    copy_curl(app);
+    apibuddy_core::curl::import(app.screen().clipboard().unwrap())
+        .unwrap()
+        .request
+        .body
+}
+
+fn replace_body(app: &mut Headless, text: &str) {
+    app.type_text("id:请求正文", "").unwrap();
+    app.press_key("mod+a").unwrap();
+    app.paste("id:请求正文", &nsh_core::PasteEvent::new(text))
+        .unwrap();
+}
+
 #[test]
 fn save_reopen_and_keep_independent_tab_drafts() {
     let sandbox = Sandbox::new();
@@ -115,9 +136,13 @@ fn import_dialog_owns_no_tab_state_and_clipboard_matches_request() {
     app.press("导入请求").unwrap();
     app.wait_for("POST  导入的请求 •").unwrap();
     app.press("Body").unwrap();
+    copy_curl(&mut app);
     assert_eq!(
-        app.screen().input_text("id:请求正文").unwrap(),
-        Some("{\"name\":\"中文\"}")
+        apibuddy_core::curl::import(app.screen().clipboard().unwrap())
+            .unwrap()
+            .request
+            .body,
+        "{\"name\":\"中文\"}"
     );
     app.press("Authorization").unwrap();
     assert_eq!(
@@ -128,7 +153,7 @@ fn import_dialog_owns_no_tab_state_and_clipboard_matches_request() {
         app.screen().input_text("id:Basic 密码").unwrap(),
         Some("test-only")
     );
-    app.press("复制 cURL").unwrap();
+    copy_curl(&mut app);
     let clipboard = app.screen().clipboard().unwrap();
     let input = apibuddy_core::curl::import(clipboard).unwrap();
     assert_eq!(input.request.method, "POST");
@@ -173,7 +198,7 @@ fn import_preview_rejects_lost_body_and_recovers_after_correction() {
         app.screen().input_text("id:请求 URL").unwrap(),
         Some("https://example.com/echo?fixed=1&q=%E4%B8%AD%E6%96%87+%26%2B#part")
     );
-    app.press("复制 cURL").unwrap();
+    copy_curl(&mut app);
     let input = apibuddy_core::curl::import(app.screen().clipboard().unwrap()).unwrap();
     assert!(input.request.body.is_empty());
     assert_eq!(input.request.method, "GET");
@@ -248,11 +273,15 @@ fn body_modes_preserve_raw_and_disabled_form_fields_across_restart() {
     fill(&mut app, "id:Form 值", "中文 & + {{unused}}");
     app.press("label:启用Form 字段 1").unwrap();
     app.press("JSON").unwrap();
+    copy_curl(&mut app);
     assert_eq!(
-        app.screen().input_text("id:请求正文").unwrap(),
-        Some("{\"name\":\"中文\"}")
+        apibuddy_core::curl::import(app.screen().clipboard().unwrap())
+            .unwrap()
+            .request
+            .body,
+        "{\"name\":\"中文\"}"
     );
-    app.press("复制 cURL").unwrap();
+    copy_curl(&mut app);
     let input = apibuddy_core::curl::import(app.screen().clipboard().unwrap()).unwrap();
     assert_eq!(input.request.body, "{\"name\":\"中文\"}");
     app.press("label:保存请求").unwrap();
@@ -268,12 +297,12 @@ fn body_modes_preserve_raw_and_disabled_form_fields_across_restart() {
         app.screen().input_text("id:Form 值").unwrap(),
         Some("中文 & + {{unused}}")
     );
-    app.press("复制 cURL").unwrap();
+    copy_curl(&mut app);
     let input = apibuddy_core::curl::import(app.screen().clipboard().unwrap()).unwrap();
     assert_eq!(input.request.body, "");
     fill(&mut app, "id:Form 值", "中文 & +");
     app.press("label:启用Form 字段 1").unwrap();
-    app.press("复制 cURL").unwrap();
+    copy_curl(&mut app);
     let input = apibuddy_core::curl::import(app.screen().clipboard().unwrap()).unwrap();
     assert_eq!(input.request.body, "name=%E4%B8%AD%E6%96%87+%26+%2B");
     let saved = apibuddy_core::TemplateStore::new(&sandbox.0)
@@ -369,4 +398,118 @@ fn response_search_and_json_fields_work_across_views_and_tabs() {
     app.press("复制响应").unwrap();
     assert_eq!(app.screen().clipboard().unwrap(), body);
     server.join().unwrap();
+}
+
+#[test]
+fn native_body_editor_formats_undoes_and_keeps_workbench_shortcuts() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.start();
+    app.press("导入 cURL").unwrap();
+    app.type_text(
+        "id:cURL 命令",
+        "curl http://localhost/echo --json '{\"name\":\"中文😀\",\"count\":1}'",
+    )
+    .unwrap();
+    app.press("导入请求").unwrap();
+    app.press("Body").unwrap();
+    let original = body_text(&mut app);
+    app.press("格式化").unwrap();
+    let formatted = body_text(&mut app);
+    assert!(formatted.contains('\n'));
+    app.type_text("id:请求正文", "").unwrap();
+    app.press_key("mod+z").unwrap();
+    assert_eq!(body_text(&mut app), original);
+    app.type_text("id:请求正文", "").unwrap();
+    app.press_key("mod+shift+z").unwrap();
+    assert_eq!(body_text(&mut app), formatted);
+    app.press("压缩").unwrap();
+    let compact = body_text(&mut app);
+    assert!(!compact.contains('\n'));
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&compact).unwrap()["name"],
+        "中文😀"
+    );
+    replace_body(&mut app, "{\n  \"name\": \"中文\",\n}");
+    app.press("格式化").unwrap();
+    app.wait_for("JSON 格式错误：第 3 行，第 1 列 · trailing comma at line 3 column 1")
+        .unwrap();
+    assert_eq!(body_text(&mut app), "{\n  \"name\": \"中文\",\n}");
+    replace_body(&mut app, &original);
+    app.press_key("mod+s").unwrap();
+    app.wait_for("保存到集合").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("已保存 · 修订 1").unwrap();
+    fill(&mut app, "id:请求 URL", "invalid-url");
+    app.type_text("id:请求正文", "").unwrap();
+    app.press_key("mod+enter").unwrap();
+    app.wait_for("请输入有效的绝对 URL").unwrap();
+}
+
+#[test]
+fn duplicate_and_keyboard_navigation_keep_independent_drafts_and_close_the_neighbor() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.start();
+    fill(&mut app, "id:请求名称", "原请求");
+    fill(&mut app, "id:请求 URL", "http://localhost/original");
+    app.press("label:保存请求").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("已保存 · 修订 1").unwrap();
+    app.press_key("mod+shift+d").unwrap();
+    app.wait_for("GET  原请求 副本 •").unwrap();
+    fill(&mut app, "id:请求 URL", "http://localhost/copy");
+    app.press_key("ctrl+shift+tab").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求 URL").unwrap(),
+        Some("http://localhost/original")
+    );
+    app.press_key("ctrl+tab").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求 URL").unwrap(),
+        Some("http://localhost/copy")
+    );
+    app.press("label:保存请求").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("已保存 · 修订 1").unwrap();
+    app.press_key("mod+t").unwrap();
+    fill(&mut app, "id:请求名称", "邻居");
+    app.press_key("mod+t").unwrap();
+    fill(&mut app, "id:请求名称", "末尾");
+    app.press_key("mod+2").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求名称").unwrap(),
+        Some("原请求 副本")
+    );
+    app.press_key("mod+w").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求名称").unwrap(),
+        Some("邻居")
+    );
+    app.press_key("mod+9").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求名称").unwrap(),
+        Some("末尾")
+    );
+    app.wait_for("草稿已保存在本机").unwrap();
+    drop(app);
+    let templates = apibuddy_core::TemplateStore::new(&sandbox.0)
+        .list()
+        .unwrap()
+        .templates;
+    assert_eq!(templates.len(), 2);
+    assert!(
+        templates
+            .iter()
+            .any(|t| t.name == "原请求" && t.request.url.ends_with("/original"))
+    );
+    assert!(
+        templates
+            .iter()
+            .any(|t| t.name == "原请求 副本" && t.request.url.ends_with("/copy"))
+    );
+    let mut app = sandbox.start();
+    app.wait_for("草稿已恢复").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求名称").unwrap(),
+        Some("末尾")
+    );
 }

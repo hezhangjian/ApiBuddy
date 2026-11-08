@@ -1,4 +1,4 @@
-//! Typed boundary shared by the native UI and the WebView UI.
+//! Desktop commands and persisted workspace data.
 use crate::{Environments, SavedTemplate, Service, ServiceInput, TemplateInput};
 use serde::{Deserialize, Serialize};
 
@@ -103,16 +103,6 @@ pub struct Library {
     pub templates: Vec<SavedTemplate>,
     pub environments: Environments,
     pub warnings: Vec<String>,
-}
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Request {
-    pub id: u64,
-    pub command: Command,
-}
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Reply {
-    pub id: u64,
-    pub result: Result<serde_json::Value, String>,
 }
 pub type Events = Vec<(u64, Vec<Event>)>;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

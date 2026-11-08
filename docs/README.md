@@ -1,6 +1,6 @@
 # ApiBuddy 文档
 
-当前开发分支：`dev`（原 dev 备份为 `dev-before-nsh-20261108`），Rust + Native Shell 原生/WebView 双桌面入口；由 `ApiBuddy-dev` 的现有 Rust 工作区切出。
+当前开发分支：`dev`（原 dev 备份为 `dev-before-nsh-20261108`），Rust + Native Shell 原生桌面；双版本基线存档于 `archive/nsh-webview-20261108`；由 `ApiBuddy-dev` 的现有 Rust 工作区切出。
 
 - [PRODUCT](PRODUCT.md)：当前能力与边界。
 - [ARCHITECTURE](ARCHITECTURE.md)：NSH 状态、共享核心和存储。
