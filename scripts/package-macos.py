@@ -17,6 +17,9 @@ binary = target / profile / exe
 if not binary.exists():
     flag = " --release" if profile == "release" else "" if profile == "debug" else f" --profile {profile}"
     raise SystemExit(f"missing binary: {binary}; run cargo build{flag} -p {exe} first")
+icon = root / "crates/apibuddy-app/assets/brand/ApiBuddy.icns"
+if not icon.is_file():
+    raise SystemExit(f"missing icon: {icon}; run python3 scripts/generate-icons.py first")
 
 bundle = root / "dist" / f"{name}.app"
 if bundle.exists():
@@ -24,6 +27,7 @@ if bundle.exists():
 (bundle / "Contents/MacOS").mkdir(parents=True)
 (bundle / "Contents/Resources").mkdir()
 shutil.copy2(binary, bundle / "Contents/MacOS" / exe)
+shutil.copy2(icon, bundle / "Contents/Resources" / icon.name)
 
 with (bundle / "Contents/Info.plist").open("wb") as stream:
     plistlib.dump(
@@ -32,6 +36,7 @@ with (bundle / "Contents/Info.plist").open("wb") as stream:
             "CFBundleDisplayName": name,
             "CFBundleIdentifier": identifier,
             "CFBundleExecutable": exe,
+            "CFBundleIconFile": icon.name,
             "CFBundlePackageType": "APPL",
             "CFBundleShortVersionString": "0.0.1",
             "CFBundleVersion": "1",

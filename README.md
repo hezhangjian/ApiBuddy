@@ -35,6 +35,8 @@ python3 scripts/package-macos.py
 
 输出为 `dist/ApiBuddy.app`，默认读写 `~/.apibuddy`，接受 `APIBUDDY_DIR`。集合、环境、历史及原生草稿沿用现有格式；旧 WebView 工作区文件保留原位，不自动迁移或删除。
 
+工作台和 macOS 应用图标统一使用 Buddy 系列的 ApiBuddy 正式素材，资源随应用内置。更新图标的方法见[品牌素材说明](crates/apibuddy-app/assets/brand/README.md)。
+
 ## 日常开发：NSH CLI 自动重编
 
 原生版日常编辑优先使用官方 `nsh run`。项目的 `nsh.json` 已声明 Rust 根组件；CLI 会监听 UI crate 和本地共享后端，源码变更后自动编译并重启。Rust 模式是重启应用；草稿和标签自动保存在本机，响应正文不恢复。重启前确认底栏显示「草稿已保存在本机」。

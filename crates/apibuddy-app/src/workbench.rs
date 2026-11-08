@@ -4,7 +4,7 @@ use crate::{
     ui,
 };
 use nsh_base::{SelectItem, button, theme};
-use nsh_core::prelude::*;
+use nsh_core::{element::ImageSrc, prelude::*};
 
 pub fn workbench(store: Workbench) -> impl IntoElement {
     let sidebar = signal(true);
@@ -74,9 +74,8 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 .border_b_1()
                 .border_color(|| theme().border)
                 .child(ui::icon_button(ui::Glyph::Sidebar, "切换侧栏", move || sidebar.update(|v| *v = !*v)))
-                .child(view().size(px(24.0)).rounded(px(7.0)).bg(|| theme().primary)
-                    .items_center().justify_center()
-                    .child(ui::label("A").font_weight(FontWeight::BOLD).text_color(|| theme().primary_foreground)))
+                .child(svg(ImageSrc::svg_markup(include_str!("../assets/brand/ApiBuddy-app-icon.svg")))
+                    .size(px(30.0)).flex_shrink_0().label("ApiBuddy 图标"))
                 .child(ui::label("ApiBuddy").font_weight(FontWeight::SEMIBOLD).text_size(px(14.0)))
                 .child(ui::caption("/"))
                 .child(ui::muted("我的工作区").text_size(px(12.0)).flex_1())

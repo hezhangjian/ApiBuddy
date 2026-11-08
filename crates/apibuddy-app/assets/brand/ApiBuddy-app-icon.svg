@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+ <title id="title">ApiBuddy 应用图标</title>
+ <desc id="desc">深蓝底，外部透明；与独立标志使用相同几何形状。</desc>
+ <rect id="app-tile" x="48" y="48" width="928" height="928" rx="208" fill="#0B1E3F"/>
+<g transform="translate(102.4 102.4) scale(3.2)"><g id="api-braces" fill="#00B8B0">
+ <path d="M 80 32 H 72 C 48 32 36 48 36 72 V 88 C 36 104 32 112 24 112 H 22 Q 14 112 14 120 V 136 Q 14 144 22 144 H 24 C 32 144 36 152 36 168 V 184 C 36 208 48 224 72 224 H 80 Q 88 224 88 216 V 200 Q 88 192 80 192 H 76 C 64 192 62 188 62 176 V 164 C 62 148 58 136 48 128 C 58 120 62 108 62 92 V 80 C 62 68 64 64 76 64 H 80 Q 88 64 88 56 V 40 Q 88 32 80 32 Z"/>
+ <path d="M 80 32 H 72 C 48 32 36 48 36 72 V 88 C 36 104 32 112 24 112 H 22 Q 14 112 14 120 V 136 Q 14 144 22 144 H 24 C 32 144 36 152 36 168 V 184 C 36 208 48 224 72 224 H 80 Q 88 224 88 216 V 200 Q 88 192 80 192 H 76 C 64 192 62 188 62 176 V 164 C 62 148 58 136 48 128 C 58 120 62 108 62 92 V 80 C 62 68 64 64 76 64 H 80 Q 88 64 88 56 V 40 Q 88 32 80 32 Z" transform="translate(256 0) scale(-1 1)"/>
+</g>
+<g id="buddy-eyes" fill="#FFFFFF">
+ <ellipse cx="100" cy="128" rx="12.5" ry="19"/>
+ <ellipse cx="156" cy="128" rx="12.5" ry="19"/>
+</g></g>
+</svg>

@@ -1,6 +1,7 @@
 {
   "name": "ApiBuddy",
   "id": "io.github.hezhangjian.apibuddy",
+  "icon": "crates/apibuddy-app/assets/brand/ApiBuddy-app-icon.png",
   "rust": "crates/apibuddy-app",
   "root": "App",
   "theme": "crates/apibuddy-app/theme.json",

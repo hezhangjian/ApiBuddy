@@ -1,5 +1,13 @@
 # 开发与验证
 
+## 2026-11-09：接入 Buddy 系列正式图标
+
+按用户指定，使用 `~/ChuQin/Resources/Media/Images/Buddy-Logos/ApiBuddy-app-icon.svg`，原样复制到应用品牌素材目录。工作台以 30 px 原生 SVG 替换临时字母标识；图形、颜色、比例与外围透明区域保持不变，素材随程序嵌入。
+
+macOS 打包加入 `ApiBuddy.icns` 与 `CFBundleIconFile`；`nsh.json` 同时配置 1024 px PNG。`scripts/generate-icons.py` 可从同一 SVG 重建图标，临时图层自动清理，转换工具不成为日常编译依赖。已核对源文件逐字节一致、PNG/ICNS 透明通道与 10 个 1×/2× 图层；`cargo check --locked`、38 项 Rust 回归与格式检查通过。
+
+release 构建与打包通过，包内二进制、图标均与构建/品牌资源逐字节一致。复用 `dist/ApiBuddy.app` 正常退出并重启，真实 macOS 窗口已确认左上角图标、文字与布局正常；保留原有日常草稿，应用已打开供体验。此次未新增应用副本。
+
 ## 2026-11-08：原生工作台视觉统一
 
 按用户要求优化现代桌面观感，继续沿用 NSH 原生控件。主题采用冷白、石墨灰与靛蓝，统一 7–8 px 控件圆角、较轻的分隔线和文字层级；浅深色颜色随系统适配，主操作保持明显，次要动作使用无边框按钮与原生矢量图标。
