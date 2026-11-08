@@ -1,5 +1,12 @@
 # 工程状态与限制（NSH 分支）
 
+## 双版本边界
+
+- 原生版与 WebView 版同时维护，UI/状态和 Host/存储/HTTP 均复用。WASM 与本地能力通过类型化异步接口衔接。
+- WebView 版是桌面 App，不能脱离宿主作为独立浏览器 API 客户端使用。页面资源随包分发；API 请求不经过浏览器网络栈。
+- 两版可共用数据目录，外部保存需刷新集合；已打开草稿保留，修订冲突仍拒绝覆盖。
+- 系统 WebView 仍存在平台差异。本机验证 macOS，Windows/Linux 的编译及交互需分别验证，不能据此宣称已通过。
+
 ## 运行与构建
 
 - Rust 1.99.1，NSH v0.4.0 固定 Git revision，reqwest 0.12.28，Tokio。纯 Rust UI，不链接 QuickJS。

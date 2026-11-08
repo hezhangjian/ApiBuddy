@@ -610,7 +610,7 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                             r.body.clone()
                         }
                     });
-                    set_clipboard(value);
+                    crate::backend::copy_text(value);
                     store.notice.set("响应已复制".into());
                 })),
         )

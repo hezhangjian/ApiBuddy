@@ -10,28 +10,7 @@ use tokio::{runtime::Runtime, sync::oneshot};
 
 pub const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
 
-#[derive(Debug)]
-pub enum Event {
-    Headers {
-        status: u16,
-        status_text: String,
-        headers: String,
-        url: String,
-    },
-    Text {
-        text: String,
-        bytes: usize,
-    },
-    End(Outcome),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Outcome {
-    Completed,
-    Cancelled,
-    TimedOut,
-    Failed(String),
-}
+pub use crate::protocol::{Event, Outcome};
 
 pub struct Operation {
     cancel: Option<oneshot::Sender<()>>,

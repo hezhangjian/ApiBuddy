@@ -1,6 +1,6 @@
 # ApiBuddy 文档
 
-当前开发分支：`feat/nsh-postman-core`，Rust + Native Shell 原生桌面；由 `ApiBuddy-dev` 的现有 Rust 工作区切出。
+当前开发分支：`feat/nsh-postman-core`，Rust + Native Shell 原生/WebView 双桌面入口；由 `ApiBuddy-dev` 的现有 Rust 工作区切出。
 
 - [PRODUCT](PRODUCT.md)：当前能力与边界。
 - [ARCHITECTURE](ARCHITECTURE.md)：NSH 状态、共享核心和存储。

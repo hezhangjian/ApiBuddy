@@ -55,7 +55,7 @@ pub struct SavedTemplate {
     pub request: RequestDraft,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResolvedRequest {
     pub method: Method,
     pub url: String,

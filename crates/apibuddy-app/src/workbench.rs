@@ -162,7 +162,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                         search.set(value.into())
                                     })
                                     .element_ref(&search_ref)
-                                    .placeholder(if cfg!(target_os = "macos") {
+                                    .placeholder(if crate::backend::mac_shortcuts() {
                                         "搜索名称、URL…  ⌘K"
                                     } else {
                                         "搜索名称、URL…  Ctrl+K"
@@ -437,7 +437,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                         .number_of_lines(1)
                         .text_size(px(11.0)),
                 )
-                .child(ui::muted(if cfg!(target_os = "macos") {
+                .child(ui::muted(if crate::backend::mac_shortcuts() {
                     "⌘↵ 发送   ⌘S 保存   ⌘T 新建"
                 } else {
                     "Ctrl+Enter 发送   Ctrl+S 保存   Ctrl+T 新建"

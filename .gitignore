@@ -24,3 +24,6 @@ node_modules/
 # Local packaging
 *.app/
 *.dmg
+
+# NSH generated runtime/build workspace
+/.nsh/

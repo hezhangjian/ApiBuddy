@@ -4,6 +4,7 @@ members = [
     "crates/apibuddy-core",
     "crates/apibuddy-app",
     "crates/apibuddy-cli",
+    "crates/apibuddy-webview",
 ]
 default-members = ["crates/apibuddy-app"]
 

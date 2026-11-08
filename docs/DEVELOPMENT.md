@@ -1,5 +1,21 @@
 # 开发与验证
 
+## 2026-11-08：原生与 WebView 双桌面入口
+
+原生版 `apibuddy-app` 与 WebView 版 `apibuddy-webview` 同时保留，共用 Rust UI/状态及 `apibuddy-core::host::Host`。Web 页面用项目固定 NSH revision 的工具打包，wasm-bindgen 固定为 0.2.130；WebView 使用 NSH 自带控件和消息通道，HTTP/存储/剪贴板由本地执行。
+
+验证记录：
+
+- `cargo check --locked`、`cargo fmt --all --check`、`git diff --check` 通过。共享 UI 的 `wasm32-unknown-unknown` 编译检查通过；原生 CLI 可选 feature 与保留 CLI 的编译检查通过。
+- `cargo test --locked -p apibuddy-core -p apibuddy-app -p apibuddy-webview`：18 项 Rust 测试通过。`node --test web/host.test.mjs`：3 项桥接测试通过。覆盖共享文件/修订冲突、跨请求事件保留、关闭后释放并发槽、响应上限/UTF-8/取消/超时、资源路径与 Host 限制、消息匹配与超时。
+- 两个 release 二进制构建通过；同一 Rust UI 的正式 WASM 打包成功，页面资源约 10.5 MB（含预压缩文件）。两个 macOS `.app` 分别生成，WebView 包内自带页面资源。
+- 使用系统临时数据目录和本机随机端口回显服务，真实原生窗口发送 GET 得到 200 并保存。WebView 窗口读取该接口，发送得到 200；慢请求取消显示「已取消」，中文 SSE 三段全部显示。
+- WebView 导入含中文 JSON、自定义请求头和查询参数的 cURL，POST 回显均正确；复制响应后粘贴验证本地剪贴板通道。WebView 保存修订 2 后，原生刷新可见；原生旧草稿保存被修订冲突拒绝。
+- 最终两个 release 应用包重启后均读取到已保存接口，macOS WebView 显示正确的 ⌘ 快捷键提示，实际 ⌘Enter 已验证。界面截图检查通过。
+
+未验证 Windows/Linux 的编译及实际交互；真实拼音 IME、屏幕阅读器和跨显示器行为仍需专项验证。测试没有访问日常数据。没有提交、推送或合并 main。
+
+
 ## 2026-11-07：Windows 构建交接
 
 按用户要求，将当前 Rust/NSH 实现通过 `feat/nsh-postman-core` 功能分支交接到另一台电脑，保持 CLI 默认关闭。README 补充 Windows MSVC 前置条件、PowerShell 克隆与 release 构建命令、exe 路径和隔离数据目录设置。

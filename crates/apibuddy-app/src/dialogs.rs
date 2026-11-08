@@ -71,14 +71,12 @@ fn service(store: Workbench) -> impl IntoElement {
                     .placeholder("http://127.0.0.1:42427"),
             )
             .child(ui::primary("创建服务", move || {
-                if store.create_service(ServiceInput {
+                store.create_service(ServiceInput {
                     name: name.get_untracked(),
                     slug: slug.get_untracked(),
                     base_url: base.get_untracked(),
                     description: String::new(),
-                }) {
-                    store.dialog.set(Dialog::None);
-                }
+                });
             })),
     )
 }
@@ -241,9 +239,7 @@ fn environments(store: Workbench) -> impl IntoElement {
                     store.notice.set(error);
                     return;
                 }
-                if store.save_environments(data.get_untracked()) {
-                    store.dialog.set(Dialog::None);
-                }
+                store.save_environments(data.get_untracked());
             })),
     )
 }
@@ -314,9 +310,7 @@ fn close(store: Workbench, id: u64) -> impl IntoElement {
                             .tabs
                             .with_untracked(|tabs| tabs.iter().find(|t| t.id == id).copied());
                         if let Some(tab) = tab {
-                            if store.save(tab, false) {
-                                store.close(id);
-                            }
+                            store.save_and_close(tab);
                         }
                     })),
             ),

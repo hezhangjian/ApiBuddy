@@ -1,3 +1,4 @@
+mod backend;
 mod dialogs;
 mod request;
 mod state;
@@ -11,10 +12,14 @@ fn native(registry: &mut Registry) {
     registry.register::<App>();
 }
 
-/// The native API workbench.
+/// The shared Rust workbench, rendered natively or in WebAssembly.
 #[component]
 pub fn App() -> impl IntoElement {
-    match apibuddy_core::data_directory() {
+    #[cfg(target_arch = "wasm32")]
+    let directory: apibuddy_core::Result<std::path::PathBuf> = Ok(Default::default());
+    #[cfg(not(target_arch = "wasm32"))]
+    let directory = apibuddy_core::data_directory();
+    match directory {
         Ok(root) => workbench::workbench(state::Workbench::new(root)).into_element(),
         Err(error) => view()
             .p_4()

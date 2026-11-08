@@ -2,7 +2,7 @@
 
 用 Rust + **Native Shell（NSH）0.4.0** 构建的桌面 API 客户端，在桌面编辑、发送、查看响应并保存请求。
 
-本分支为 `feat/nsh-postman-core`，从 `dev` 切出并保留原有未提交的 Rust 迁移。NSH 使用纯 Rust 模式，macOS 由 AppKit 原生渲染；不使用 WebView、Node 或 QuickJS。
+本分支为 `feat/nsh-postman-core`，从 `dev` 切出并保留原有未提交的 Rust 迁移。现同时提供原生桌面与 WebView 桌面两个入口，共用 NSH Rust UI、交互状态和本地 Rust 后端。原生版在 macOS 使用 AppKit；WebView 版把同一 UI 编译成 WASM，由 WKWebView 显示。两个应用均不使用 QuickJS 或 Node 运行应用代码。
 
 ## 运行
 
@@ -25,6 +25,33 @@ python3 scripts/fixture-server.py
 ```
 
 在桌面新建服务：名称「订单服务」、ID `orders`、基础地址 `http://127.0.0.1:42427`。新建请求后填写名称和 URL（例如 `{{base_url}}/echo`），编辑 Params / Headers / Body，再发送并保存。
+
+## 两种桌面版本
+
+| 入口 | 运行方式 | 网络与存储 |
+| --- | --- | --- |
+| 原生版 `apibuddy-app`（默认） | NSH 原生控件 | 本地 Rust |
+| WebView 版 `apibuddy-webview` | 同一 NSH Rust UI → WASM → 系统 WebView | 同一份本地 Rust，通过消息桥调用 |
+
+```sh
+# 原生版（沿用原命令）
+cargo run -p apibuddy-app
+
+# WebView 版：首次准备固定版本工具、WASM UI 与 release 宿主
+python3 scripts/build-webview.py
+cargo run --release -p apibuddy-webview
+
+# macOS 两个独立应用包
+cargo build --release -p apibuddy-app
+python3 scripts/package-macos.py
+python3 scripts/package-macos.py release webview
+```
+
+输出为 `dist/ApiBuddy.app`、`dist/ApiBuddy WebView.app`。两版默认读写同一个 `~/.apibuddy`，也都接受 `APIBUDDY_DIR`；可以同时运行，外部修改后点击「刷新集合」，已打开草稿保留，保存沿用修订冲突检测。
+
+WebView 版的页面资源随应用打包，离线也能启动。HTTP 请求、环境解析、文件存储和剪贴板仍在本机 Rust 内执行；浏览器不会向目标 API 发请求，因此不要求目标服务配置 CORS。页面资源由随机本机端口提供，不对外暴露后端 API。这不是独立浏览器版，直接访问页面会提示需要桌面宿主。
+
+首次 Web 构建需要联网下载 WASM 目标和编译工具；macOS 需要可编译 WASM 的 LLVM（例如 Homebrew `llvm`）。`NSH_CLI`、`NSH_WASM_BINDGEN` 可指向已有匹配工具；默认安装在 `target/webview-tools`，不覆盖全局工具。`APIBUDDY_WEB_ASSETS` 可覆盖页面资源目录用于开发。详见 [双版本架构](docs/ARCHITECTURE.md)。
 
 ## 在 Windows 构建
 
@@ -69,7 +96,8 @@ CLI 与 AI Agent 接入暂缓：源码保留，桌面入口默认关闭，安装
 | Crate | 职责 |
 | --- | --- |
 | `apibuddy-core` | 请求/服务/环境、存储、HTTP、cURL、CLI |
-| `apibuddy-app` | NSH 原生工作台 |
+| `apibuddy-app` | 两版共用的 NSH Rust 工作台，以及原生入口 |
+| `apibuddy-webview` | WebView 桌面宿主、消息桥与本地静态资源服务 |
 | `apibuddy-cli` | 保留的 CLI 构想，不默认构建或打包 |
 
 ```sh
