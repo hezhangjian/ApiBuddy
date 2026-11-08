@@ -315,6 +315,14 @@ pub fn choice(
 }
 
 pub fn tabs(labels: &'static [&'static str], selected: Signal<usize>) -> impl IntoElement {
+    tabs_with_counts(labels, selected, |_| 0)
+}
+
+pub fn tabs_with_counts(
+    labels: &'static [&'static str],
+    selected: Signal<usize>,
+    count: impl Fn(usize) -> usize + Copy + 'static,
+) -> impl IntoElement {
     view().flex_row().gap_1().child(
         labels
             .iter()
@@ -338,16 +346,23 @@ pub fn tabs(labels: &'static [&'static str], selected: Signal<usize>) -> impl In
                     .hover(|s| s.bg(|| theme().secondary))
                     .on_press(move || selected.set(index))
                     .child(
-                        label(*title)
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(move || {
-                                if selected.get() == index {
-                                    theme().primary
-                                } else {
-                                    theme().muted_foreground
-                                }
-                            }),
+                        label(move || {
+                            let total = count(index);
+                            if total == 0 {
+                                (*title).to_string()
+                            } else {
+                                format!("{title}  {total}")
+                            }
+                        })
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(move || {
+                            if selected.get() == index {
+                                theme().primary
+                            } else {
+                                theme().muted_foreground
+                            }
+                        }),
                     )
             })
             .collect::<Vec<_>>(),

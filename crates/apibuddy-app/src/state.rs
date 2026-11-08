@@ -79,6 +79,7 @@ pub struct Workbench {
     pub catalog: Signal<Vec<Service>>,
     pub selected_service: Signal<String>,
     pub library: Signal<Vec<SavedTemplate>>,
+    pub library_loading: Signal<bool>,
     pub environments: Signal<Environments>,
     pub tabs: Signal<Vec<RequestTab>>,
     pub active: Signal<u64>,
@@ -110,6 +111,7 @@ impl Workbench {
             catalog: signal(vec![default_service()]),
             selected_service: signal("default".to_string()),
             library: signal(Vec::new()),
+            library_loading: signal(false),
             environments: signal(empty_environments()),
             tabs: signal(Vec::new()),
             active: signal(0),
@@ -336,6 +338,7 @@ impl Workbench {
     }
 
     pub fn reload_service(self) {
+        self.library_loading.set(true);
         let service = self.selected_service.get_untracked();
         let generation = self.load_generation.with(|v| {
             *v += 1;
@@ -349,6 +352,7 @@ impl Workbench {
             if self.load_generation.with(|v| *v) != generation {
                 return;
             }
+            self.library_loading.set(false);
             match result {
                 Ok(library) => {
                     if !library.warnings.is_empty() {
@@ -363,7 +367,11 @@ impl Workbench {
                 }
                 Err(e) => {
                     self.library.set(Vec::new());
-                    self.environments.set(empty_environments());
+                    if self.current().is_none_or(|t| {
+                        t.service.get_untracked().id == self.selected_service.get_untracked()
+                    }) {
+                        self.environments.set(empty_environments());
+                    }
                     self.notice.set(e.to_string());
                 }
             }
@@ -371,6 +379,8 @@ impl Workbench {
     }
 
     pub fn select_service(self, id: String) {
+        // Never expose the previous collection's rows under the new collection ID.
+        self.library.set(Vec::new());
         self.selected_service.set(id);
         self.reload_service();
     }

@@ -77,12 +77,8 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 .child(svg(ImageSrc::svg_markup(include_str!("../assets/brand/ApiBuddy-app-icon.svg")))
                     .size(px(30.0)).flex_shrink_0().label("ApiBuddy 图标"))
                 .child(ui::label("ApiBuddy").font_weight(FontWeight::SEMIBOLD).text_size(px(14.0)))
-                .child(ui::caption("/"))
-                .child(ui::muted("我的工作区").text_size(px(12.0)).flex_1())
-                .child(ui::caption("LOCAL").text_size(px(10.0)).px_2().py_1().rounded(px(5.0)).bg(|| theme().secondary))
+                .child(view().flex_1())
                 .child(ui::icon_action(ui::Glyph::Import, "导入 cURL", move || store.dialog.set(Dialog::Import)))
-                .child(ui::icon_action(ui::Glyph::Sliders, "环境", move || store.dialog.set(Dialog::Environment))
-                    .accessibility_label("管理环境"))
                 .child({
                     #[cfg(feature = "cli-integration")]
                     { Some(ui::action("CLI 与 AI", move || store.install_cli()).into_element()) }
@@ -156,6 +152,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                             move || filtered.with(Vec::len),
                                             move |at| {
                                                 button()
+                                                    .accessibility_label(move || filtered.with(|items| items.get(at.index()).map(|t| SharedString::from(format!("打开请求 {}", t.name)))))
                                                     .h(px(52.0))
                                                     .px_3()
                                                     .justify_center()
@@ -230,8 +227,18 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                         .flex_1()
                                         .empty(
                                             view().px_4().py_5().gap_2()
-                                                .child(ui::caption("还没有匹配的接口"))
-                                                .child(ui::muted("保存请求，建立你的接口集合。").text_size(px(12.0)).number_of_lines(2)),
+                                                .child(ui::caption(move || {
+                                                    if store.library_loading.get() { "正在读取集合…" }
+                                                    else if search.with(|s| s.trim().is_empty()) { "集合中还没有请求" }
+                                                    else { "没有匹配的请求" }
+                                                }))
+                                                .child(ui::muted(move || {
+                                                    if search.with(|s| s.trim().is_empty()) { "发送并保存请求后，它会出现在这里。" }
+                                                    else { "试试名称、URL 或请求方法。" }
+                                                }).text_size(px(12.0)).number_of_lines(2))
+                                                .child(when(move || !search.with(String::is_empty), move || {
+                                                    ui::ghost("清除搜索", move || search.set(String::new()))
+                                                })),
                                         ),
                                     )
                                     .into_element()
@@ -386,7 +393,14 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     .flex_1().min_h(px(0.0))
                                     .handle_class("h-px bg-border group-hover:bg-primary group-active:bg-primary")
                                     .handle_thumb_class("h-5 w-[3px] rounded-full bg-muted-foreground opacity-0 group-hover:opacity-40")
-                                    .child(nsh_base::resizable_panel().min_size(px(260.0)).child(request::request_editor(store, tab)))
+                                    .child(nsh_base::resizable_panel().min_size(px(260.0)).child(request::request_editor(store, tab, move || {
+                                        batch(|| {
+                                            search.set(String::new());
+                                            navigation.set(0);
+                                            sidebar.set(true);
+                                        });
+                                        store.select_service(tab.service.get_untracked().id);
+                                    })))
                                     .child(nsh_base::resizable_panel().min_size(px(280.0)).child(response::response_view(store, tab)))
                                     .into_element(),
                                 None => view().into_element(),

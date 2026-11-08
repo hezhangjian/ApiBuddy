@@ -3,11 +3,15 @@ use crate::{
     ui,
 };
 use apibuddy_core::{Authentication, METHODS, Pair, Variable};
-use nsh_base::SelectItem;
 use nsh_base::editor::{Editor, EditorApi, EditorPosition, EditorSelection, editor};
+use nsh_base::{SelectItem, button, menu, menu_item, theme};
 use nsh_core::prelude::*;
 
-pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
+pub fn request_editor(
+    store: Workbench,
+    tab: RequestTab,
+    show_collection: impl Fn() + 'static,
+) -> impl IntoElement {
     let timeout =
         signal((tab.draft.with_untracked(|d| d.request.timeout_ms) as f64 / 1000.0).to_string());
     view()
@@ -21,12 +25,52 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .px_4()
                 .py_2()
                 .child(
+                    button()
+                        .h(px(30.0))
+                        .px_2()
+                        .flex_row()
+                        .items_center()
+                        .gap_2()
+                        .rounded(px(6.0))
+                        .hover(|s| s.bg(|| theme().secondary))
+                        .accessibility_label(move || {
+                            Some(SharedString::from(if tab.saved.get().is_some() {
+                                "查看所属集合"
+                            } else {
+                                "选择保存集合"
+                            }))
+                        })
+                        .on_press(move || {
+                            if tab.saved.get_untracked().is_some() {
+                                show_collection();
+                            } else {
+                                store.save(tab, false);
+                            }
+                        })
+                        .child(ui::icon(ui::Glyph::Folder))
+                        .child(
+                            ui::muted(move || {
+                                if tab.saved.get().is_some() {
+                                    tab.service.with(|s| s.name.clone())
+                                } else {
+                                    "临时请求".into()
+                                }
+                            })
+                            .max_w(px(150.0))
+                            .number_of_lines(1)
+                            .text_size(px(12.0)),
+                        ),
+                )
+                .child(ui::caption("/"))
+                .child(
                     ui::field(
                         "请求名称",
                         move || tab.draft.with(|d| d.name.clone()),
                         move |value| tab.draft.update(|d| d.name = value.into()),
                     )
-                    .w(px(210.0))
+                    .flex_1()
+                    .min_w(px(100.0))
+                    .max_w(px(300.0))
                     .h(px(30.0))
                     .font_weight(FontWeight::MEDIUM)
                     .border_color(|| AdaptiveColor::TRANSPARENT)
@@ -35,15 +79,17 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .child(
                     ui::muted(move || {
                         if tab.saved.get().is_none() {
-                            "未保存".into()
+                            "未保存"
+                        } else if Workbench::dirty(tab) {
+                            "已修改"
                         } else {
-                            tab.service.with(|s| format!("/ {}", s.name))
+                            "已保存"
                         }
                     })
-                    .flex_1()
                     .text_size(px(11.0))
                     .number_of_lines(1),
                 )
+                .child(view().flex_1())
                 .child(
                     ui::choice(
                         "环境",
@@ -75,19 +121,20 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                     )
                     .w(px(145.0)),
                 )
+                .child(ui::icon_button(
+                    ui::Glyph::Sliders,
+                    "管理环境",
+                    move || {
+                        store.dialog.set(crate::state::Dialog::Environment);
+                    },
+                ))
                 .child(
                     ui::icon_action(ui::Glyph::Folder, "保存", move || {
                         store.save(tab, false);
                     })
                     .accessibility_label("保存请求"),
                 )
-                .child(ui::ghost("另存", move || {
-                    store.save(tab, true);
-                }))
-                .child(
-                    ui::icon_action(ui::Glyph::Copy, "复制", move || store.duplicate(tab))
-                        .accessibility_label("复制请求标签"),
-                ),
+                .child(request_menu(store, tab)),
         )
         .child(
             view()
@@ -143,6 +190,15 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                     .rounded(px(8.0))
                     .bg(|| nsh_base::theme().secondary)
                     .placeholder("https://api.example.com/path")
+                    .auto_focus(
+                        tab.saved.get_untracked().is_none()
+                            && tab.draft.with_untracked(|d| d.request.url.is_empty()),
+                    )
+                    .on_submit(move |_: &str| {
+                        if !tab.response.with_untracked(|r| r.running) {
+                            store.send(tab);
+                        }
+                    })
                     .flex_1(),
                 )
                 .child(
@@ -168,13 +224,28 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .px_4()
                 .border_b_1()
                 .border_color(|| nsh_base::theme().border)
-                .child(view().flex_1().child(ui::tabs(
+                .child(view().flex_1().child(ui::tabs_with_counts(
                     &["Params", "Headers", "Body", "Authorization", "变量", "设置"],
                     tab.section,
-                )))
-                .child(ui::icon_action(ui::Glyph::Code, "复制 cURL", move || {
-                    store.copy_curl(tab)
-                })),
+                    move |index| {
+                        tab.draft.with(|d| match index {
+                            0 => d
+                                .request
+                                .query
+                                .iter()
+                                .filter(|p| p.enabled && !p.key.is_empty())
+                                .count(),
+                            1 => d
+                                .request
+                                .headers
+                                .iter()
+                                .filter(|p| p.enabled && !p.key.is_empty())
+                                .count(),
+                            4 => d.request.variables.len(),
+                            _ => 0,
+                        })
+                    },
+                ))),
         )
         .child(dynamic(move || match tab.section.get() {
             0 => pairs(tab, 0).into_element(),
@@ -206,6 +277,51 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 )
                 .into_element(),
         }))
+}
+
+fn request_menu(store: Workbench, tab: RequestTab) -> impl IntoElement {
+    let item = |title: &'static str, action: usize| {
+        menu_item()
+            .accessibility_label(title)
+            .h(px(34.0))
+            .px_3()
+            .flex_row()
+            .items_center()
+            .gap_2()
+            .rounded(px(5.0))
+            .focus(|s| s.bg(|| theme().accent))
+            .hover(|s| s.bg(|| theme().accent))
+            .on_select(move || match action {
+                0 => store.save(tab, true),
+                1 => store.duplicate(tab),
+                _ => store.copy_curl(tab),
+            })
+            .child(ui::icon(match action {
+                0 => ui::Glyph::Folder,
+                1 => ui::Glyph::Copy,
+                _ => ui::Glyph::Code,
+            }))
+            .child(ui::label(title).text_size(px(12.0)))
+    };
+    menu()
+        .align(Align::End)
+        .offset(px(4.0))
+        .popup_class("w-44 p-1 bg-popover border border-border rounded-lg shadow-lg")
+        .trigger(
+            view()
+                .h(px(30.0))
+                .px_2()
+                .rounded(px(6.0))
+                .items_center()
+                .justify_center()
+                .role(AccessibilityRole::Button)
+                .label("更多请求操作")
+                .hover(|s| s.bg(|| theme().secondary))
+                .child(ui::muted("•••").text_size(px(17.0))),
+        )
+        .child(item("另存到集合…", 0))
+        .child(item("复制为临时请求", 1))
+        .child(item("复制 cURL", 2))
 }
 
 fn pair_rows(d: &apibuddy_core::RequestDraft, kind: usize) -> &[Pair] {

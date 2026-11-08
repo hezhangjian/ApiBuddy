@@ -23,10 +23,13 @@ impl Sandbox {
         Self(std::env::temp_dir().join(format!("apibuddy-ui-{}", uuid::Uuid::new_v4())))
     }
     fn start(&self) -> Headless {
+        self.start_at(1360.0)
+    }
+    fn start_at(&self, width: f32) -> Headless {
         let root = self.0.to_string_lossy().to_string();
         let theme = nsh_base::Theme::from_json(include_str!("../theme.json")).unwrap();
         let mut config = EngineConfig {
-            viewport: size(px(1360.0), px(900.0)),
+            viewport: size(px(width), px(900.0)),
             ui_sets: vec![nsh_base::registry()],
             ..EngineConfig::new(
                 Root::new::<Harness>(move || HarnessProps {
@@ -54,6 +57,7 @@ fn fill(app: &mut Headless, name: &str, value: &str) {
 }
 
 fn copy_curl(app: &mut Headless) {
+    app.press("label:更多请求操作").unwrap();
     app.press("复制 cURL").unwrap();
     app.wait_for("已复制当前环境下的 cURL（含请求头与实际变量值）")
         .unwrap();
@@ -257,6 +261,80 @@ fn send_shortcut_works_while_url_input_has_focus() {
 }
 
 #[test]
+fn collection_breadcrumb_restores_navigation_and_keeps_unsaved_edits() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.start_at(1040.0);
+    fill(&mut app, "id:请求名称", "查询订单");
+    fill(&mut app, "id:请求 URL", "http://localhost/orders");
+    app.press("label:选择保存集合").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("已保存 · 修订 1").unwrap();
+    app.wait_for("已保存").unwrap();
+    fill(&mut app, "id:请求 URL", "http://localhost/orders/42");
+    app.wait_for("已修改").unwrap();
+
+    // Browsing a different collection must not change the active request's parent.
+    app.press("label:新建集合").unwrap();
+    fill(&mut app, "id:服务名称", "另一集合");
+    app.press("创建集合").unwrap();
+    app.wait_for("集合已创建").unwrap();
+    fill(&mut app, "id:搜索接口", "不会匹配的内容");
+    app.press("History").unwrap();
+    app.press("label:切换侧栏").unwrap();
+    app.press("label:查看所属集合").unwrap();
+    app.wait_for("label:打开请求 查询订单").unwrap();
+    assert!(app.screen().selected("Collections").unwrap());
+    assert_eq!(app.screen().input_text("id:搜索接口").unwrap(), Some(""));
+    assert_eq!(
+        app.screen().input_text("id:请求 URL").unwrap(),
+        Some("http://localhost/orders/42")
+    );
+    app.wait_for("已修改").unwrap();
+    app.press("label:保存请求").unwrap();
+    app.wait_for("已保存 · 修订 2").unwrap();
+    let templates = apibuddy_core::TemplateStore::new(&sandbox.0)
+        .list()
+        .unwrap()
+        .templates;
+    assert_eq!(templates.len(), 1);
+    assert_eq!(templates[0].request.url, "http://localhost/orders/42");
+}
+
+#[test]
+fn request_menu_duplicates_and_saves_a_separate_request() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.start_at(1040.0);
+    fill(&mut app, "id:请求名称", "原请求");
+    fill(&mut app, "id:请求 URL", "http://localhost/original");
+    app.press("label:保存请求").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("已保存 · 修订 1").unwrap();
+
+    app.press("label:更多请求操作").unwrap();
+    app.press("复制为临时请求").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求名称").unwrap(),
+        Some("原请求 副本")
+    );
+    fill(&mut app, "id:请求 URL", "http://localhost/copy");
+    app.press("label:更多请求操作").unwrap();
+    app.press("另存到集合…").unwrap();
+    app.press("保存到集合").unwrap();
+    app.wait_for("label:打开请求 原请求 副本").unwrap();
+    app.press("GET  原请求").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求 URL").unwrap(),
+        Some("http://localhost/original")
+    );
+    let templates = apibuddy_core::TemplateStore::new(&sandbox.0)
+        .list()
+        .unwrap()
+        .templates;
+    assert_eq!(templates.len(), 2);
+    assert_ne!(templates[0].id, templates[1].id);
+}
+
+#[test]
 fn body_modes_preserve_raw_and_disabled_form_fields_across_restart() {
     let sandbox = Sandbox::new();
     let mut app = sandbox.start();
@@ -341,7 +419,7 @@ fn response_search_and_json_fields_work_across_views_and_tabs() {
     let mut app = sandbox.start();
     fill(&mut app, "id:请求名称", "查找测试");
     fill(&mut app, "id:请求 URL", &url);
-    app.press_key("mod+enter").unwrap();
+    app.press_key("enter").unwrap();
     app.wait_for("200 OK").unwrap();
     app.press("Raw").unwrap();
     app.press_key("mod+f").unwrap();

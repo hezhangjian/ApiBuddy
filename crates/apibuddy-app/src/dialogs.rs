@@ -269,6 +269,13 @@ fn environments(store: Workbench) -> impl IntoElement {
         "管理环境",
         view()
             .gap_3()
+            .child(ui::caption(format!(
+                "所属集合：{}",
+                store
+                    .current()
+                    .map(|tab| tab.service.get_untracked().name)
+                    .unwrap_or_else(|| store.service().name)
+            )))
             .child(
                 view()
                     .flex_row()
