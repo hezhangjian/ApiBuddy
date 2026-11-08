@@ -1,26 +1,56 @@
 {
   "name": "ApiBuddy",
   "cssVars": {
-    "theme": {"radius": "6px"},
+    "theme": {
+      "radius": "8px"
+    },
     "light": {
-      "background": "#ffffff", "foreground": "#252629",
-      "card": "#ffffff", "card-foreground": "#252629",
-      "popover": "#ffffff", "popover-foreground": "#252629",
-      "primary": "#e05d32", "primary-foreground": "#ffffff",
-      "secondary": "#f5f5f6", "secondary-foreground": "#252629",
-      "muted": "#f5f5f6", "muted-foreground": "#73777e",
-      "accent": "#fff0e9", "accent-foreground": "#bd4724",
-      "destructive": "#c33845", "border": "#e3e4e7", "input": "#dedfe3", "ring": "#e05d32"
+      "background": "#ffffff",
+      "foreground": "#202938",
+      "card": "#ffffff",
+      "card-foreground": "#202938",
+      "popover": "#ffffff",
+      "popover-foreground": "#202938",
+      "primary": "#505fce",
+      "primary-foreground": "#ffffff",
+      "secondary": "#f4f6fa",
+      "secondary-foreground": "#354158",
+      "muted": "#eaf0f6",
+      "muted-foreground": "#606e83",
+      "accent": "#eef0ff",
+      "accent-foreground": "#4956bb",
+      "destructive": "#ba3b52",
+      "border": "#e6ebf2",
+      "input": "#dce3ec",
+      "ring": "#7581e8",
+      "sidebar": "#f7f9fc",
+      "success": "#137a61",
+      "warning": "#996018",
+      "purple": "#8052ba"
     },
     "dark": {
-      "background": "#202124", "foreground": "#eeeff1",
-      "card": "#25262a", "card-foreground": "#eeeff1",
-      "popover": "#292b30", "popover-foreground": "#eeeff1",
-      "primary": "#ed784c", "primary-foreground": "#17181a",
-      "secondary": "#292b30", "secondary-foreground": "#eeeff1",
-      "muted": "#292b30", "muted-foreground": "#a4a7ae",
-      "accent": "#413028", "accent-foreground": "#ffab87",
-      "destructive": "#fa7b87", "border": "#3b3e44", "input": "#44474d", "ring": "#ed784c"
+      "background": "#171b24",
+      "foreground": "#e5eaf4",
+      "card": "#1e2430",
+      "card-foreground": "#e5eaf4",
+      "popover": "#222938",
+      "popover-foreground": "#e5eaf4",
+      "primary": "#98a3ff",
+      "primary-foreground": "#171b24",
+      "secondary": "#202735",
+      "secondary-foreground": "#d4dced",
+      "muted": "#111722",
+      "muted-foreground": "#96a4ba",
+      "accent": "#2c3452",
+      "accent-foreground": "#bcc5ff",
+      "destructive": "#f4879d",
+      "border": "#2b3444",
+      "input": "#394458",
+      "ring": "#98a3ff",
+      "sidebar": "#131923",
+      "success": "#6ad3b1",
+      "warning": "#e7ba73",
+      "purple": "#c1a0f1"
     }
   }
 }

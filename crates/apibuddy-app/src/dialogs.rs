@@ -105,7 +105,7 @@ fn panel(store: Workbench, title: &'static str, content: impl IntoElement) -> im
         .child(
             view()
                 .flex_1()
-                .bg(rgba(0x00000066))
+                .bg(rgba(0x111b304d))
                 .items_center()
                 .justify_center()
                 .p_4()
@@ -116,7 +116,8 @@ fn panel(store: Workbench, title: &'static str, content: impl IntoElement) -> im
                         .max_h(px(720.0))
                         .p_5()
                         .gap_4()
-                        .rounded(px(10.0))
+                        .rounded(px(14.0))
+                        .shadow_lg()
                         .bg(|| theme().background)
                         .border_1()
                         .border_color(|| theme().border)
@@ -131,7 +132,7 @@ fn panel(store: Workbench, title: &'static str, content: impl IntoElement) -> im
                                         .flex_1(),
                                 )
                                 .child(
-                                    ui::action("×", move || store.dialog.set(Dialog::None))
+                                    ui::ghost("×", move || store.dialog.set(Dialog::None))
                                         .accessibility_label("关闭对话框"),
                                 ),
                         )

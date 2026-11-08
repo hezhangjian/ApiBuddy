@@ -68,7 +68,7 @@ fn display_content(response: &Response, section: usize) -> DisplayContent {
 fn display_text(source: &str) -> DisplayContent {
     let end = source.floor_char_boundary(DISPLAY_LIMIT.min(source.len()));
     DisplayContent {
-        // Textareas normalize newlines. Use identical text for both backends' UTF-16 ranges.
+        // Normalize newlines before mapping text offsets to the editor's UTF-16 ranges.
         text: source[..end].replace("\r\n", "\n").replace('\r', "\n"),
         truncated: source.len() > end,
     }
@@ -265,6 +265,11 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
             }
         },
     );
+    let idle = computed(move || {
+        tab.response.with(|r| {
+            !r.running && r.message.is_empty() && r.body.is_empty() && r.headers.is_empty()
+        })
+    });
     view()
         .flex_1()
         .min_h(px(120.0))
@@ -278,8 +283,12 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .items_center()
                 .gap_3()
                 .px_4()
-                .bg(|| theme().secondary)
-                .child(ui::label("响应").font_weight(FontWeight::SEMIBOLD))
+                .bg(|| theme().background)
+                .child(
+                    ui::label("响应")
+                        .text_size(px(12.0))
+                        .font_weight(FontWeight::SEMIBOLD),
+                )
                 .child(
                     ui::label(move || {
                         tab.response.with(|r| {
@@ -291,27 +300,64 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         })
                     })
                     .flex_1()
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(move || {
+                        tab.response.with(|r| {
+                            if r.running {
+                                theme().primary
+                            } else if r.message == "已取消" {
+                                ui::tone("warning")
+                            } else if r.status.is_some_and(|s| (200..300).contains(&s))
+                                && r.message.starts_with('2')
+                            {
+                                ui::tone("success")
+                            } else if r.status.is_some_and(|s| (300..400).contains(&s))
+                                && r.message.starts_with('3')
+                            {
+                                ui::tone("warning")
+                            } else if r.message.is_empty() {
+                                theme().muted_foreground
+                            } else {
+                                theme().destructive
+                            }
+                        })
+                    })
                     .number_of_lines(3),
                 )
-                .child(ui::muted(move || {
-                    tab.response
-                        .with(|r| format!("{} ms  ·  {} B", r.elapsed, r.bytes))
-                }))
-                .child(ui::action("复制响应", move || {
-                    let value = tab.response.with_untracked(|r| {
-                        if state.section.get_untracked() == 2 {
-                            r.headers.clone()
-                        } else {
-                            r.body.clone()
-                        }
-                    });
-                    crate::backend::copy_text(value);
-                    store.notice.set("响应已复制".into());
-                })),
+                .child(
+                    ui::muted(move || {
+                        tab.response
+                            .with(|r| format!("{} ms  ·  {} B", r.elapsed, r.bytes))
+                    })
+                    .font_family(ui::MONO)
+                    .text_size(px(11.0))
+                    .px_2()
+                    .py_1()
+                    .bg(|| theme().secondary)
+                    .rounded(px(5.0)),
+                )
+                .child(ui::icon_action(
+                    ui::Glyph::Copy,
+                    "复制响应",
+                    move || {
+                        let value = tab.response.with_untracked(|r| {
+                            if state.section.get_untracked() == 2 {
+                                r.headers.clone()
+                            } else {
+                                r.body.clone()
+                            }
+                        });
+                        crate::backend::copy_text(value);
+                        store.notice.set("响应已复制".into());
+                    },
+                )),
         )
         .child(
             view()
                 .px_4()
+                .border_b_1()
+                .border_color(|| theme().border)
                 .flex_row()
                 .items_center()
                 .child(
@@ -333,12 +379,15 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                     .accessibility_label("切换响应自动换行"),
                 )
                 .child(
-                    ui::action("JSON 字段", move || {
+                    ui::ghost("JSON 字段", move || {
                         state.pointer_open.update(|open| *open = !*open)
                     })
                     .disabled(move || state.section.get() == 2),
                 )
-                .child(ui::action("查找", open_search).accessibility_label("查找响应")),
+                .child(
+                    ui::icon_action(ui::Glyph::Search, "查找", open_search)
+                        .accessibility_label("查找响应"),
+                ),
         )
         .child(when(
             move || state.pointer_open.get() && state.section.get() != 2,
@@ -504,6 +553,17 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .px_4()
                 .py_2()
                 .child(dynamic(move || {
+                    if idle.get() && !state.search_open.get() && !state.pointer_open.get() {
+                        return view()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .child(ui::empty_state(
+                                ui::Glyph::Arrow,
+                                "等待第一条响应",
+                                "输入 URL，发送请求，开始调试。",
+                            ))
+                            .into_element();
+                    }
                     // A different view starts with fresh virtual rows and scroll position.
                     // NSH 0.4 can retain stale gutter rows when a long document becomes a short field.
                     state.section.get();
@@ -534,7 +594,8 @@ pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         })
                         .flex_1()
                         .min_h(px(80.0))
-                        .placeholder("发送请求后查看响应正文、状态码、耗时和大小")
+                        .placeholder("响应正文为空")
+                        .into_element()
                 })),
         )
         .child(when(

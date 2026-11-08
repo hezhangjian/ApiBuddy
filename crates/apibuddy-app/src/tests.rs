@@ -379,8 +379,7 @@ fn response_search_and_json_fields_work_across_views_and_tabs() {
     app.press("label:下一处匹配").unwrap();
     app.wait_for("1 / 1").unwrap();
     app.press("label:新建请求标签").unwrap();
-    app.wait_for("发送请求后查看响应正文、状态码、耗时和大小")
-        .unwrap();
+    app.wait_for("等待第一条响应").unwrap();
     app.press("GET  查找测试 •").unwrap();
     assert_eq!(
         app.screen().input_text("id:JSON 字段路径").unwrap(),

@@ -66,25 +66,24 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
         .bg(|| theme().background)
         .child(
             view()
-                .h(px(46.0))
+                .h(px(42.0))
                 .flex_row()
                 .items_center()
                 .gap_3()
                 .px_4()
                 .border_b_1()
                 .border_color(|| theme().border)
-                .child(
-                    ui::label("ApiBuddy")
-                        .font_weight(FontWeight::BOLD)
-                        .text_size(px(17.0)),
-                )
-                .child(ui::muted("/   我的工作区").flex_1())
-                .child(ui::action("导入 cURL", move || {
-                    store.dialog.set(Dialog::Import)
-                }))
-                .child(ui::action("环境", move || {
-                    store.dialog.set(Dialog::Environment)
-                }).accessibility_label("管理环境"))
+                .child(ui::icon_button(ui::Glyph::Sidebar, "切换侧栏", move || sidebar.update(|v| *v = !*v)))
+                .child(view().size(px(24.0)).rounded(px(7.0)).bg(|| theme().primary)
+                    .items_center().justify_center()
+                    .child(ui::label("A").font_weight(FontWeight::BOLD).text_color(|| theme().primary_foreground)))
+                .child(ui::label("ApiBuddy").font_weight(FontWeight::SEMIBOLD).text_size(px(14.0)))
+                .child(ui::caption("/"))
+                .child(ui::muted("我的工作区").text_size(px(12.0)).flex_1())
+                .child(ui::caption("LOCAL").text_size(px(10.0)).px_2().py_1().rounded(px(5.0)).bg(|| theme().secondary))
+                .child(ui::icon_action(ui::Glyph::Import, "导入 cURL", move || store.dialog.set(Dialog::Import)))
+                .child(ui::icon_action(ui::Glyph::Sliders, "环境", move || store.dialog.set(Dialog::Environment))
+                    .accessibility_label("管理环境"))
                 .child({
                     #[cfg(feature = "cli-integration")]
                     { Some(ui::action("CLI 与 AI", move || store.install_cli()).into_element()) }
@@ -99,9 +98,9 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 .flex_row()
                 .child(when(sidebar, move || {
                     view()
-                        .w(px(245.0))
+                        .w(px(232.0))
                         .min_h(px(0.0))
-                        .bg(|| theme().secondary)
+                        .bg(|| theme().sidebar)
                         .border_r_1()
                         .border_color(|| theme().border)
                         .child(
@@ -112,13 +111,10 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     view()
                                         .flex_row()
                                         .items_center()
-                                        .child(ui::label("Collections").flex_1())
-                                        .child(
-                                            ui::action("+", move || {
-                                                store.dialog.set(Dialog::Service)
-                                            })
-                                            .accessibility_label("新建集合"),
-                                        ),
+                                        .gap_2()
+                                        .child(ui::icon(ui::Glyph::Folder))
+                                        .child(ui::caption("工作区集合").flex_1())
+                                        .child(ui::icon_button(ui::Glyph::Plus, "新建集合", move || store.dialog.set(Dialog::Service))),
                                 )
                                 .child(ui::choice(
                                     "当前集合",
@@ -144,12 +140,12 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     })
                                     .element_ref(&search_ref)
                                     .placeholder(if crate::backend::mac_shortcuts() {
-                                        "搜索名称、URL…  ⌘K"
+                                        "搜索接口…  ⌘K"
                                     } else {
-                                        "搜索名称、URL…  Ctrl+K"
+                                        "搜索接口…  Ctrl+K"
                                     }),
                                 )
-                                .child(ui::tabs(&["Collections", "History"], navigation)),
+                                .child(ui::segments(&["Collections", "History"], navigation)),
                         )
                         .child(dynamic(move || {
                             if navigation.get() == 0 {
@@ -165,6 +161,12 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                                     .px_3()
                                                     .justify_center()
                                                     .gap_1()
+                                                    .mx_2().rounded(px(8.0))
+                                                    .bg(move || {
+                                                        let current = store.tabs.with(|tabs| tabs.iter().find(|t| t.id == store.active.get()).and_then(|t| t.saved.get()).map(|s| s.0));
+                                                        let item = filtered.with(|items| items.get(at.index()).map(|t| t.id.clone()));
+                                                        if current.is_some() && current == item { theme().accent } else { AdaptiveColor::TRANSPARENT }
+                                                    })
                                                     .hover(|s| s.bg(|| theme().accent))
                                                     .on_press(move || {
                                                         if let Some(saved) = filtered
@@ -196,7 +198,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                                                 .w(px(51.0))
                                                                 .text_size(px(11.0))
                                                                 .font_weight(FontWeight::BOLD)
-                                                                .text_color(|| theme().primary),
+                                                                .text_color(move || filtered.with(|items| items.get(at.index()).map(|t| ui::method_color(&t.request.method)).unwrap_or(theme().primary))),
                                                             )
                                                             .child(
                                                                 ui::label(move || {
@@ -228,11 +230,9 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                         .estimated_item_size(px(52.0))
                                         .flex_1()
                                         .empty(
-                                            view()
-                                                .p_4()
-                                                .gap_2()
-                                                .child(ui::label("还没有匹配的接口"))
-                                                .child(ui::muted("新建请求，保存后会出现在这里。")),
+                                            view().px_4().py_5().gap_2()
+                                                .child(ui::caption("还没有匹配的接口"))
+                                                .child(ui::muted("保存请求，建立你的接口集合。").text_size(px(12.0)).number_of_lines(2)),
                                         ),
                                     )
                                     .into_element()
@@ -300,9 +300,10 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                         .child(
                             view()
                                 .p_3()
-                                .gap_2()
-                                .child(ui::action("+ 新建请求", move || store.new_request()))
-                                .child(ui::action("刷新集合", move || store.reload())),
+                                .gap_2().border_t_1().border_color(|| theme().border)
+                                .child(ui::icon_action(ui::Glyph::Plus, "新建请求", move || store.new_request())
+                                    .bg(|| theme().background).border_color(|| theme().input))
+                                .child(ui::icon_action(ui::Glyph::Refresh, "刷新集合", move || store.reload())),
                         )
                 }))
                 .child(
@@ -313,11 +314,11 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                         .child(
                             view()
                                 .h(px(40.0))
-                                .flex_row()
+                                .flex_row().items_center().px_2().gap_1().bg(|| theme().sidebar)
                                 .border_b_1()
                                 .border_color(|| theme().border)
                                 .child(scroll().horizontal().scrollbar(false).flex_1().child(
-                                    view().flex_row().child(each(
+                                    view().flex_row().gap_1().child(each(
                                         store.tabs,
                                         |tab| tab.id,
                                         move |value, _| {
@@ -325,26 +326,16 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                             view()
                                                 .flex_row()
                                                 .items_center()
-                                                .border_r_1()
-                                                .border_color(|| theme().border)
-                                                .bg(move || {
-                                                    if store.active.get() == tab.id {
-                                                        theme().background
-                                                    } else {
-                                                        theme().secondary
-                                                    }
+                                                .h(px(32.0)).rounded(px(7.0)).pr_1()
+                                                .border_1().border_color(move || {
+                                                    if store.active.get() == tab.id { theme().input } else { AdaptiveColor::TRANSPARENT }
                                                 })
-                                                .border_t(px(2.0))
-                                                .border_t_color(move || {
-                                                    if store.active.get() == tab.id {
-                                                        theme().primary
-                                                    } else {
-                                                        theme().border
-                                                    }
+                                                .bg(move || {
+                                                    if store.active.get() == tab.id { theme().background } else { AdaptiveColor::TRANSPARENT }
                                                 })
                                                 .child(
                                                     button()
-                                                        .h(px(37.0))
+                                                        .h(px(30.0))
                                                         .px_3()
                                                         .justify_center()
                                                         .on_press(move || store.activate(tab))
@@ -363,14 +354,17 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                                                     )
                                                                 })
                                                             })
+                                                            .text_size(px(12.0)).font_weight(FontWeight::MEDIUM)
+                                                            .text_color(move || if store.active.get() == tab.id { theme().foreground } else { theme().muted_foreground })
                                                             .max_w(px(190.0))
                                                             .number_of_lines(1),
                                                         ),
                                                 )
                                                 .child(
-                                                    ui::action("×", move || {
+                                                    ui::ghost("×", move || {
                                                         store.request_close(tab)
                                                     })
+                                                    .size(px(24.0)).px_1()
                                                     .accessibility_label(move || {
                                                         tab.draft
                                                             .with(|d| Some(SharedString::from(format!("关闭 {}", d.name))))
@@ -380,8 +374,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     )),
                                 ))
                                 .child(
-                                    ui::action("+", move || store.new_request())
-                                        .accessibility_label("新建请求标签"),
+                                    ui::icon_button(ui::Glyph::Plus, "新建请求标签", move || store.new_request()),
                                 ),
                         )
                         .child(dynamic(move || {
@@ -393,6 +386,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                 Some(tab) => nsh_base::v_resizable()
                                     .flex_1().min_h(px(0.0))
                                     .handle_class("h-px bg-border group-hover:bg-primary group-active:bg-primary")
+                                    .handle_thumb_class("h-5 w-[3px] rounded-full bg-muted-foreground opacity-0 group-hover:opacity-40")
                                     .child(nsh_base::resizable_panel().min_size(px(260.0)).child(request::request_editor(store, tab)))
                                     .child(nsh_base::resizable_panel().min_size(px(280.0)).child(response::response_view(store, tab)))
                                     .into_element(),
@@ -410,7 +404,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 .gap_3()
                 .border_t_1()
                 .border_color(|| theme().border)
-                .bg(|| theme().secondary)
+                .bg(|| theme().sidebar)
                 .child(
                     ui::muted(move || store.notice.get())
                         .flex_1()

@@ -26,17 +26,22 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         move || tab.draft.with(|d| d.name.clone()),
                         move |value| tab.draft.update(|d| d.name = value.into()),
                     )
-                    .w(px(230.0)),
+                    .w(px(210.0))
+                    .h(px(30.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .border_color(|| AdaptiveColor::TRANSPARENT)
+                    .hover(|s| s.border_color(|| nsh_base::theme().input)),
                 )
                 .child(
                     ui::muted(move || {
                         if tab.saved.get().is_none() {
-                            "未保存 · 保存时选择集合".into()
+                            "未保存".into()
                         } else {
                             tab.service.with(|s| format!("/ {}", s.name))
                         }
                     })
                     .flex_1()
+                    .text_size(px(11.0))
                     .number_of_lines(1),
                 )
                 .child(
@@ -68,19 +73,19 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                                 .set(if id.is_empty() { None } else { Some(id) })
                         },
                     )
-                    .w(px(155.0)),
+                    .w(px(145.0)),
                 )
                 .child(
-                    ui::action("保存", move || {
+                    ui::icon_action(ui::Glyph::Folder, "保存", move || {
                         store.save(tab, false);
                     })
                     .accessibility_label("保存请求"),
                 )
-                .child(ui::action("另存", move || {
+                .child(ui::ghost("另存", move || {
                     store.save(tab, true);
                 }))
                 .child(
-                    ui::action("复制", move || store.duplicate(tab))
+                    ui::icon_action(ui::Glyph::Copy, "复制", move || store.duplicate(tab))
                         .accessibility_label("复制请求标签"),
                 ),
         )
@@ -103,7 +108,29 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         move || tab.draft.with(|d| d.request.method.clone()),
                         move |method| tab.draft.update(|d| d.request.method = method),
                     )
-                    .w(px(112.0)),
+                    .w(px(110.0))
+                    .trigger(
+                        view()
+                            .h(px(40.0))
+                            .px_3()
+                            .flex_row()
+                            .items_center()
+                            .gap_2()
+                            .rounded(px(8.0))
+                            .border_1()
+                            .border_color(|| nsh_base::theme().input)
+                            .bg(|| nsh_base::theme().secondary)
+                            .child(
+                                ui::label(move || tab.draft.with(|d| d.request.method.clone()))
+                                    .font_family(ui::MONO)
+                                    .font_weight(FontWeight::BOLD)
+                                    .flex_1()
+                                    .text_color(move || {
+                                        tab.draft.with(|d| ui::method_color(&d.request.method))
+                                    }),
+                            )
+                            .child(ui::caption("⌄")),
+                    ),
                 )
                 .child(
                     ui::field(
@@ -112,6 +139,9 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         move |value| tab.draft.update(|d| d.request.url = value.into()),
                     )
                     .font_family(ui::MONO)
+                    .h(px(40.0))
+                    .rounded(px(8.0))
+                    .bg(|| nsh_base::theme().secondary)
                     .placeholder("https://api.example.com/path")
                     .flex_1(),
                 )
@@ -126,7 +156,8 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         },
                         move || store.send(tab),
                     )
-                    .w(px(90.0))
+                    .w(px(96.0))
+                    .h(px(40.0))
                     .accessibility_label("发送或取消请求"),
                 ),
         )
@@ -135,11 +166,15 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .flex_row()
                 .items_center()
                 .px_4()
+                .border_b_1()
+                .border_color(|| nsh_base::theme().border)
                 .child(view().flex_1().child(ui::tabs(
                     &["Params", "Headers", "Body", "Authorization", "变量", "设置"],
                     tab.section,
                 )))
-                .child(ui::action("复制 cURL", move || store.copy_curl(tab))),
+                .child(ui::icon_action(ui::Glyph::Code, "复制 cURL", move || {
+                    store.copy_curl(tab)
+                })),
         )
         .child(dynamic(move || match tab.section.get() {
             0 => pairs(tab, 0).into_element(),
@@ -215,10 +250,11 @@ fn pairs(tab: RequestTab, kind: usize) -> impl IntoElement {
                             "参数会编码后追加到 URL，支持重复参数"
                         }
                     })
+                    .text_size(px(11.0))
                     .flex_1(),
                 )
                 .child(
-                    ui::action("+ 添加", move || {
+                    ui::ghost("+ 添加", move || {
                         tab.draft.update(|d| {
                             let rows = pair_rows_mut(&mut d.request, kind);
                             if rows.len() < 100 {
@@ -233,6 +269,24 @@ fn pairs(tab: RequestTab, kind: usize) -> impl IntoElement {
                     .accessibility_label(format!("添加{title}")),
                 ),
         )
+        .child(
+            view()
+                .h(px(26.0))
+                .flex_row()
+                .gap_2()
+                .items_center()
+                .px_2()
+                .bg(|| nsh_base::theme().secondary)
+                .rounded(px(5.0))
+                .child(ui::caption("启用").w(px(38.0)))
+                .child(ui::caption("KEY").flex_1())
+                .child(ui::caption("VALUE").flex_1())
+                .child(view().w(px(30.0))),
+        )
+        .child(when(
+            move || rows.with(Vec::is_empty),
+            move || ui::caption("暂无字段 · 点击右上角添加").px_2().py_3(),
+        ))
         .child(scroll().flex_1().child(view().gap_1().child(each(
             rows,
             |i| *i,
@@ -421,23 +475,51 @@ fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
                             } else if d.request.form.is_some() {
                                 "Form 字段 · 切换模式保留草稿"
                             } else {
-                                "原始正文 · 支持 {{变量}} · 切换模式保留草稿"
+                                "原始正文 · 支持 {{变量}}"
                             }
                         })
                     })
+                    .text_size(px(11.0))
+                    .number_of_lines(1)
                     .flex_1(),
                 )
-                .child(ui::action("JSON", move || {
-                    set_body_type(tab, "application/json")
-                }))
-                .child(ui::action("Text", move || set_body_type(tab, "text/plain")))
-                .child(ui::action("Form", move || {
-                    set_body_type(tab, "application/x-www-form-urlencoded")
-                }))
                 .child(
-                    ui::action("格式化", move || format(false)).disabled(move || form_mode.get()),
+                    ui::ghost("JSON", move || set_body_type(tab, "application/json"))
+                        .selected(move || !form_mode.get() && json_mode.get())
+                        .bg(move || {
+                            if !form_mode.get() && json_mode.get() {
+                                nsh_base::theme().accent
+                            } else {
+                                AdaptiveColor::TRANSPARENT
+                            }
+                        }),
                 )
-                .child(ui::action("压缩", move || format(true)).disabled(move || form_mode.get()))
+                .child(
+                    ui::ghost("Text", move || set_body_type(tab, "text/plain"))
+                        .selected(move || !form_mode.get() && !json_mode.get())
+                        .bg(move || {
+                            if !form_mode.get() && !json_mode.get() {
+                                nsh_base::theme().accent
+                            } else {
+                                AdaptiveColor::TRANSPARENT
+                            }
+                        }),
+                )
+                .child(
+                    ui::ghost("Form", move || {
+                        set_body_type(tab, "application/x-www-form-urlencoded")
+                    })
+                    .selected(move || form_mode.get())
+                    .bg(move || {
+                        if form_mode.get() {
+                            nsh_base::theme().accent
+                        } else {
+                            AdaptiveColor::TRANSPARENT
+                        }
+                    }),
+                )
+                .child(ui::ghost("格式化", move || format(false)).disabled(move || form_mode.get()))
+                .child(ui::ghost("压缩", move || format(true)).disabled(move || form_mode.get()))
                 .child(
                     ui::action(
                         move || {
