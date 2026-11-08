@@ -114,7 +114,7 @@ cargo build --locked --release -p apibuddy-app
 - Bearer Token、Basic Auth、API Key（Header / Query）及手动 Headers 认证。模板变量与每服务环境（环境覆盖模板默认值）。
 - 真实 HTTP 请求、流式文本、取消、超时、状态码、耗时、字节数；最多 8 个并发请求、8 MiB 响应。
 - Pretty / Raw / 响应头；只读代码视图、行号、JSON 着色和自动换行开关；响应文本查找、区分大小写、命中循环导航；JSON Pointer 字段提取与复制。长响应预览上限 256 KiB，字段提取与复制仍使用完整响应；请求与响应区域可拖动调整。
-- 常用 POSIX cURL 文本导入和实际请求导出。解析不会执行 shell，也不会读取 cURL 引用的文件。
+- 常用 POSIX cURL 文本导入和实际请求导出，支持 JSON、URL 编码数据、GET 查询与 Basic 认证；导入前预览方法、URL、正文大小与认证类型。解析不会执行 shell，也不会读取 cURL 引用的文件。
 - 本机最近 50 条请求历史（最多 8 MiB，含成功、失败、取消与超时），点击恢复为可编辑草稿；两个入口共享历史。
 
 快捷键：⌘/Ctrl+Enter 发送或取消，⌘/Ctrl+S 保存，⌘/Ctrl+T 新建，⌘/Ctrl+W 关闭标签，⌘/Ctrl+K 搜索，⌘/Ctrl+B 收放侧栏，⌘/Ctrl+F 查找响应，Enter 或 ⌘/Ctrl+G 下一处，Shift+⌘/Ctrl+G 上一处；Esc 优先关闭查找，否则取消请求。

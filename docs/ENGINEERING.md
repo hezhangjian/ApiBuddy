@@ -38,8 +38,11 @@
 
 ## 导入与历史
 
-- cURL 支持单条 POSIX 命令的 URL、`-X/--request`、`-H/--header`、`-d/--data`、`--data-raw`、`--data-binary`（字面文本）、`-I/--head`、`-m/--max-time` 和静默输出选项。
+- cURL 支持单条 POSIX 命令的 URL、`-X/--request`、`-H/--header`、`-d/--data`、`--data-raw`、`--data-binary`（字面文本）、`--json`、`--data-urlencode`、`-G/--get`、`-u/--user`（Basic）、`-I/--head`、`-m/--max-time` 和静默输出选项。支持 `-sS`、`-XPOST`、`-H'Name: Value'`、长参数 `--name=value` 和 `--` 参数终止符。
+- `--json` 补齐 Content-Type / Accept，重复 JSON 直接拼接；显式请求头优先，包括 Authorization 优先于 `-u`。URL 编码按 UTF-8，保留重复字段；`-G` 将数据追加到查询中并清空正文，保留已有查询与片段。`--data-urlencode` 的 `@file`、`name@file` 不读取，字面 `@` 可写为 `name=内容` 或 `=内容`。Basic 必须提供冒号分隔的用户名和密码，不弹出密码提示。
+- 无法保持请求语义的组合明确拒绝：GET / HEAD 正文、`--head` 搭配其他显式方法、GET 数据含未编码的空白/非 ASCII/`#`（改用 `--data-urlencode`）、`-H 'Name:'` 删除默认头。空请求头用 `-H 'Name;'`，导出也使用该形式。导入摘要不展示认证值；错误时禁用导入按钮，修正后可继续。解析结果复用于预览和导入，不执行请求。
 - 未支持参数明确报错；不执行 shell、展开变量/命令、访问引用文件或跟随 `-L`。可用单引号包裹含 shell 字符的字面值。
+- 参数语义参考 [cURL 官方手册](https://curl.se/docs/manpage.html)，并用本机 cURL 与临时回显服务对照；这里只实现上述子集，不读取 `.curlrc` 或复制其他 cURL 运行环境。
 - 历史落盘到 `desktop/history.json`，保留最近 50 条请求且总量不超过 8 MiB（超限从最旧条目淘汰），不包含响应正文。请求头、正文和认证配置仍为明文；两个入口追加时合并，不覆盖彼此历史。重新打开后需主动发送；环境取发送时保存的 ID，重发时使用该环境当前值。
 
 ## 桌面验证边界

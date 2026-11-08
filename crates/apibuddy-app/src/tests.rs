@@ -111,7 +111,7 @@ fn import_dialog_owns_no_tab_state_and_clipboard_matches_request() {
     let sandbox = Sandbox::new();
     let mut app = sandbox.start();
     app.press("导入 cURL").unwrap();
-    app.type_text("id:cURL 命令", "curl 'http://127.0.0.1:42427/echo' -X POST -H 'Content-Type: application/json' --data-raw '{\"name\":\"中文\"}'").unwrap();
+    app.type_text("id:cURL 命令", "curl -sS 'http://127.0.0.1:42427/echo' --json '{\"name\":\"中文\"}' -usample:test-only -m1.5").unwrap();
     app.press("导入请求").unwrap();
     app.wait_for("POST  导入的请求 •").unwrap();
     app.press("Body").unwrap();
@@ -119,14 +119,64 @@ fn import_dialog_owns_no_tab_state_and_clipboard_matches_request() {
         app.screen().input_text("id:请求正文").unwrap(),
         Some("{\"name\":\"中文\"}")
     );
+    app.press("Authorization").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:Basic 用户名").unwrap(),
+        Some("sample")
+    );
+    assert_eq!(
+        app.screen().input_text("id:Basic 密码").unwrap(),
+        Some("test-only")
+    );
     app.press("复制 cURL").unwrap();
     let clipboard = app.screen().clipboard().unwrap();
     let input = apibuddy_core::curl::import(clipboard).unwrap();
     assert_eq!(input.request.method, "POST");
     assert_eq!(input.request.body, "{\"name\":\"中文\"}");
+    assert_eq!(input.request.timeout_ms, 1500);
+    assert!(
+        input
+            .request
+            .headers
+            .iter()
+            .any(|h| h.key.eq_ignore_ascii_case("authorization")
+                && h.value == "Basic c2FtcGxlOnRlc3Qtb25seQ==")
+    );
     app.press("label:保存请求").unwrap();
     app.press("保存到集合").unwrap();
     app.wait_for("已保存 · 修订 1").unwrap();
+}
+
+#[test]
+fn import_preview_rejects_lost_body_and_recovers_after_correction() {
+    let sandbox = Sandbox::new();
+    let mut app = sandbox.start();
+    app.press("导入 cURL").unwrap();
+    fill(
+        &mut app,
+        "id:cURL 命令",
+        "curl https://example.com -XGET -d q=value",
+    );
+    app.wait_for("GET / HEAD 不支持正文；查询参数请使用 -G / --get")
+        .unwrap();
+    assert!(app.press("导入请求").unwrap_err().contains("disabled"));
+    // A rejected import keeps the dialog and the original request untouched.
+    assert!(app.screen().input_text("id:cURL 命令").unwrap().is_some());
+    fill(
+        &mut app,
+        "id:cURL 命令",
+        "curl 'https://example.com/echo?fixed=1#part' -G --data-urlencode 'q=中文 &+'",
+    );
+    app.press("导入请求").unwrap();
+    app.wait_for("GET  导入的请求 •").unwrap();
+    assert_eq!(
+        app.screen().input_text("id:请求 URL").unwrap(),
+        Some("https://example.com/echo?fixed=1&q=%E4%B8%AD%E6%96%87+%26%2B#part")
+    );
+    app.press("复制 cURL").unwrap();
+    let input = apibuddy_core::curl::import(app.screen().clipboard().unwrap()).unwrap();
+    assert!(input.request.body.is_empty());
+    assert_eq!(input.request.method, "GET");
 }
 
 #[test]

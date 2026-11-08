@@ -2,7 +2,7 @@ use crate::{
     state::{Dialog, Workbench},
     ui,
 };
-use apibuddy_core::{Environment, ServiceInput, Variable, curl};
+use apibuddy_core::{Authentication, Environment, ServiceInput, Variable, curl};
 use nsh_base::{SelectItem, dialog, theme};
 use nsh_core::prelude::*;
 
@@ -172,20 +172,37 @@ fn service(store: Workbench) -> impl IntoElement {
 
 fn import(store: Workbench) -> impl IntoElement {
     let source = signal(String::new());
+    let parsed = computed(move || curl::import(&source.get()).map_err(|error| error.to_string()));
     let preview = computed(move || {
         if source.with(String::is_empty) {
             return "粘贴一条 cURL 命令，检查后导入为新标签。".into();
         }
-        match curl::import(&source.get()) {
-            Ok(input) => format!(
-                "{} {} · {} 个请求头 · {} B 正文",
-                input.request.method,
-                input.request.url,
-                input.request.headers.len(),
-                input.request.body.len()
-            ),
-            Err(error) => error.to_string(),
-        }
+        parsed.with(|result| match result {
+            Ok(input) => {
+                let request = &input.request;
+                let auth = if matches!(request.auth, Authentication::Basic { .. }) {
+                    "Basic 认证"
+                } else if request
+                    .headers
+                    .iter()
+                    .any(|h| h.key.eq_ignore_ascii_case("authorization"))
+                {
+                    "请求头认证"
+                } else {
+                    "无认证"
+                };
+                format!(
+                    "{} {}\n{} 个请求头 · {} B 正文 · {}\n超时 {} 秒 · 导入后手动发送",
+                    request.method,
+                    request.url,
+                    request.headers.len(),
+                    request.body.len(),
+                    auth,
+                    request.timeout_ms as f64 / 1000.0
+                )
+            }
+            Err(error) => error.clone(),
+        })
     });
     panel(
         store,
@@ -198,19 +215,19 @@ fn import(store: Workbench) -> impl IntoElement {
                     .flex_none()
                     .placeholder("curl 'https://api.example.com/users'"),
             )
-            .child(ui::label(move || preview.get()).number_of_lines(4))
+            .child(ui::label(move || preview.get()).number_of_lines(5))
             .child(ui::muted(
-                "支持 URL、-X、-H、-d / --data-raw、-I、--max-time。导入不会发送请求。",
-            ))
+                "支持 -X、-H、-d、--json、--data-urlencode、-G、-u、-I、--max-time；可用 -sS、-XPOST 和 --header=值。",
+            ).number_of_lines(3))
             .child(ui::primary("导入请求", move || {
-                match curl::import(&source.get_untracked()) {
+                match parsed.get_untracked() {
                     Ok(input) => {
                         store.open(store.service(), input, None, None);
                         store.dialog.set(Dialog::None);
                     }
-                    Err(error) => store.notice.set(error.to_string()),
+                    Err(error) => store.notice.set(error),
                 }
-            })),
+            }).disabled(move || parsed.with(Result::is_err))),
     )
 }
 
