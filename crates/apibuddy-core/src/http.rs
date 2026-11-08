@@ -167,7 +167,7 @@ async fn execute(
         .body(request.body)
         .send()
         .await
-        .map_err(|_| "请求失败，请检查地址、网络、TLS 证书或响应是否中断".to_string())?;
+        .map_err(|error| request_error(&error).to_string())?;
 
     let status = response.status().as_u16();
     let status_text = response
@@ -192,10 +192,20 @@ async fn execute(
     let mut decoder = encoding_rs::UTF_8.new_decoder_without_bom_handling();
     let mut response = response;
     loop {
-        let chunk = response
-            .chunk()
-            .await
-            .map_err(|_| "请求失败，请检查地址、网络、TLS 证书或响应是否中断".to_string())?;
+        let chunk = match response.chunk().await {
+            Ok(chunk) => chunk,
+            Err(_) => {
+                let text = if request.stream {
+                    let mut text = String::with_capacity(4);
+                    let _ = decoder.decode_to_string(&[], &mut text, true);
+                    text
+                } else {
+                    String::from_utf8_lossy(&buffer).into_owned()
+                };
+                let _ = tx.send(Event::Text { text, bytes });
+                return Err("响应读取中断，已保留收到的内容；请检查服务器或网络后重试".into());
+            }
+        };
         let Some(chunk) = chunk else {
             break;
         };
@@ -238,5 +248,33 @@ async fn execute(
 impl Default for Outcome {
     fn default() -> Self {
         Self::Failed("未开始".into())
+    }
+}
+
+fn request_error(error: &reqwest::Error) -> &'static str {
+    // Use typed causes, never expose error URLs or credentials in the message.
+    use std::{error::Error as _, io::ErrorKind};
+    let mut cause = error.source();
+    while let Some(source) = cause {
+        if let Some(io) = source.downcast_ref::<std::io::Error>() {
+            match io.kind() {
+                ErrorKind::ConnectionRefused => {
+                    return "连接被拒绝，请确认服务已启动、地址和端口正确";
+                }
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted => {
+                    return "连接被中断，请检查服务器或网络后重试";
+                }
+                ErrorKind::TimedOut => return "连接超时，请检查网络或增加请求超时时间",
+                _ => {}
+            }
+        }
+        cause = source.source();
+    }
+    if error.is_timeout() {
+        "连接超时，请检查网络或增加请求超时时间"
+    } else if error.is_connect() {
+        "连接失败，请检查域名、网络或 TLS 证书"
+    } else {
+        "未能取得有效响应，请检查服务器或网络后重试"
     }
 }

@@ -54,6 +54,9 @@ pub fn validate_environments(value: &serde_json::Value) -> Result<Environments> 
             variables: profile.variables.clone(),
             timeout_ms: 30_000,
             stream: true,
+            auth: Default::default(),
+            form: None,
+            form_draft: None,
         };
         let checked = validate_draft(&stub)?;
         profiles.push(Environment {

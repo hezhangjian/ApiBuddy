@@ -2,7 +2,7 @@
 
 用 Rust + **Native Shell（NSH）0.4.0** 构建的桌面 API 客户端，在桌面编辑、发送、查看响应并保存请求。
 
-本分支为 `feat/nsh-postman-core`，从 `dev` 切出并保留原有未提交的 Rust 迁移。现同时提供原生桌面与 WebView 桌面两个入口，共用 NSH Rust UI、交互状态和本地 Rust 后端。原生版在 macOS 使用 AppKit；WebView 版把同一 UI 编译成 WASM，由 WKWebView 显示。两个应用均不使用 QuickJS 或 Node 运行应用代码。
+当前本地分支为 `dev`，由 NSH 功能分支 更名；原 dev 保留为 `dev-before-nsh-20261108`，备份分支仅保留本地。现同时提供原生桌面与 WebView 桌面两个入口，共用 NSH Rust UI、交互状态和本地 Rust 后端。原生版在 macOS 使用 AppKit；WebView 版把同一 UI 编译成 WASM，由 WKWebView 显示。两个应用均不使用 QuickJS 或 Node 运行应用代码。
 
 ## 运行
 
@@ -24,7 +24,7 @@ APIBUDDY_DIR="$(mktemp -d -t apibuddy-demo)" cargo run -p apibuddy-app
 python3 scripts/fixture-server.py
 ```
 
-在桌面新建服务：名称「订单服务」、ID `orders`、基础地址 `http://127.0.0.1:42427`。新建请求后填写名称和 URL（例如 `{{base_url}}/echo`），编辑 Params / Headers / Body，再发送并保存。
+打开应用后直接输入 `http://127.0.0.1:42427/echo` 并发送，无需创建服务。保存时命名并选择集合，也可在保存框里新建集合。左侧 Collections / History 切换集合与本地历史；点击 + 新建独立请求标签。
 
 ## 两种桌面版本
 
@@ -53,14 +53,50 @@ WebView 版的页面资源随应用打包，离线也能启动。HTTP 请求、�
 
 首次 Web 构建需要联网下载 WASM 目标和编译工具；macOS 需要可编译 WASM 的 LLVM（例如 Homebrew `llvm`）。`NSH_CLI`、`NSH_WASM_BINDGEN` 可指向已有匹配工具；默认安装在 `target/webview-tools`，不覆盖全局工具。`APIBUDDY_WEB_ASSETS` 可覆盖页面资源目录用于开发。详见 [双版本架构](docs/ARCHITECTURE.md)。
 
+## 日常开发：NSH CLI 自动重编
+
+原生版日常编辑优先使用官方 `nsh run`。项目的 `nsh.json` 已声明 Rust 根组件；CLI 会监听 UI crate 和本地共享后端，源码变更后自动编译并重启。Rust 模式是重启应用；草稿和标签自动保存在本机，响应正文不恢复。重启前确认底栏显示「草稿已保存在本机」。
+
+当前项目的 WebView 构建流程已将匹配固定 revision 的 CLI 安装在 `target/webview-tools/bin`。在仓库根目录的终端中设置一次：
+
+```sh
+export PATH="$PWD/target/webview-tools/bin:$PATH"
+export APIBUDDY_DIR="$HOME/.apibuddy-dev"
+nsh run                 # 保持运行；保存 Rust 代码后自动重编重启，Ctrl-C 停止
+```
+
+也可以不设置 PATH，直接执行 `APIBUDDY_DIR="$HOME/.apibuddy-dev" ./target/webview-tools/bin/nsh run`。CLI 若尚未准备，可安装同一固定版本：`cargo install --locked --git https://github.com/longbridge/nsh --rev e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3 nsh-cli`。
+
+`nsh check` 检查配置中的应用 crate；`nsh package --target macos` 生成原生安装包。`nsh run` 本身不会更新下面固定到 Dock 的独立开发包。当前 `nsh run --target web` 也不等于我们的 WebView 桌面宿主：页面桥接依赖本机宿主，WebView 版仍使用下方构建入口。
+
+当前 NSH 0.4.0 的监听器只识别依赖清单中的显式 `path`，因此应用对 `apibuddy-core` 使用 `path = "../apibuddy-core"`；仍指向同一个 workspace crate。
+
+## macOS 一键开发包与 Dock 更新
+
+在仓库根目录运行：
+
+```sh
+./dev                 # 构建并重启原生开发版
+./dev webview         # 构建 WASM UI 并重启 WebView 开发版
+./dev both            # 更新两个开发版
+./dev --release       # 原生版使用 release 构建
+./dev webview --release
+```
+
+命令自动构建、打包、更新 `~/Applications/ApiBuddy Dev.app` 或 `~/Applications/ApiBuddy WebView Dev.app`，首次固定到 Dock，随后复用同一图标并重启对应开发版。原生宿主默认 debug 增量构建；WebView 的 WASM 页面仍由 NSH 进行优化打包。没有文件监听或热更新，修改后再次执行命令。
+
+两个开发版默认共享 `~/.apibuddy-dev`；独立 Bundle ID，和普通应用包区分。可用 `./dev both --data-dir /绝对路径` 指定数据目录，该路径保存在开发应用包中，从 Dock 启动也生效。临时打包文件放在系统临时目录。
+
+**重启前确认底栏的草稿保存状态**：编辑后约 0.5 秒自动保存标签、草稿和环境选择；立即强制退出仍可能丢失最后一次改动。编译和打包完成后才退出旧开发版；只重启上述固定安装路径的应用，不强制杀进程。现有 `cargo run` 和独立打包命令仍可使用。
+
 ## 在 Windows 构建
 
 使用 Windows 10 1809+（建议 Windows 11），安装 Git、[Rust MSVC 工具链](https://www.rust-lang.org/tools/install) 和 Visual Studio Build Tools 的「使用 C++ 的桌面开发」工作负载（含 Windows SDK）。本项目不启用 NSH 的 JavaScript/QuickJS 功能，不需要 Node。
 
-在 PowerShell 中执行：
+当前已验证本机 macOS，Windows 尚未验证。Windows 可在 PowerShell 中克隆 `dev` 并构建：
 
 ```powershell
-git clone --branch feat/nsh-postman-core https://github.com/hezhangjian/ApiBuddy.git
+git clone --branch dev https://github.com/hezhangjian/ApiBuddy.git
 cd ApiBuddy
 cargo build --locked --release -p apibuddy-app
 .\target\release\apibuddy-app.exe
@@ -72,18 +108,18 @@ cargo build --locked --release -p apibuddy-app
 
 ## 桌面能力
 
-- 服务集合、名称/URL/方法搜索、请求保存与另存副本。
-- 最多 20 个独立请求标签，切换保留草稿和响应；关闭未保存标签有保存提示。
-- 七种 HTTP 方法；可启停的查询参数和请求头；原始 JSON、Text、URL-encoded Form 正文及 JSON 格式化。
-- Bearer Token 表单；其他认证可通过请求头配置。模板变量与每服务环境（环境覆盖模板默认值）。
+- 无前置服务步骤的临时请求；Collections / History、名称/URL/方法搜索、保存时选择或新建集合、重命名与另存副本。
+- 最多 20 个独立请求标签，切换保留草稿和响应；关闭未保存标签有保存提示。草稿自动落盘，重启恢复且不会自动重发。
+- 七种 HTTP 方法；可启停的查询参数和请求头；JSON、Text、URL-encoded Form 字段及 JSON 格式化；Form 字段自动编码，支持启停。切换原始正文与 Form 保留各自草稿及字段状态，保存/重启后可继续编辑。
+- Bearer Token、Basic Auth、API Key（Header / Query）及手动 Headers 认证。模板变量与每服务环境（环境覆盖模板默认值）。
 - 真实 HTTP 请求、流式文本、取消、超时、状态码、耗时、字节数；最多 8 个并发请求、8 MiB 响应。
-- Pretty / Raw / 响应头，复制完整响应；请求与响应区域可拖动调整。
+- Pretty / Raw / 响应头；只读代码视图、行号、JSON 着色和自动换行开关；响应文本查找、区分大小写、命中循环导航；JSON Pointer 字段提取与复制。长响应预览上限 256 KiB，字段提取与复制仍使用完整响应；请求与响应区域可拖动调整。
 - 常用 POSIX cURL 文本导入和实际请求导出。解析不会执行 shell，也不会读取 cURL 引用的文件。
-- 本次会话最近 50 条请求历史，点击恢复为可编辑草稿。
+- 本机最近 50 条请求历史（最多 8 MiB，含成功、失败、取消与超时），点击恢复为可编辑草稿；两个入口共享历史。
 
-快捷键：⌘/Ctrl+Enter 发送或取消，⌘/Ctrl+S 保存，⌘/Ctrl+T 新建，⌘/Ctrl+W 关闭标签，⌘/Ctrl+K 搜索，⌘/Ctrl+B 收放侧栏，Esc 取消请求。
+快捷键：⌘/Ctrl+Enter 发送或取消，⌘/Ctrl+S 保存，⌘/Ctrl+T 新建，⌘/Ctrl+W 关闭标签，⌘/Ctrl+K 搜索，⌘/Ctrl+B 收放侧栏，⌘/Ctrl+F 查找响应，Enter 或 ⌘/Ctrl+G 下一处，Shift+⌘/Ctrl+G 上一处；Esc 优先关闭查找，否则取消请求。
 
-标签、未保存草稿、响应和历史目前只保留在会话中；重启后从集合重新打开已保存接口。不含团队协作、脚本断言、OAuth 向导、OpenAPI/Postman Collection 导入、multipart/文件上传、WebSocket、持久历史和秘密管理。实现的是 Postman 风格的 HTTP 调试核心工作流。
+响应正文仅保留在会话中；未保存草稿也会明文保存在本机。两版分别恢复各自的标签，共享集合、环境和历史。不含团队协作、脚本断言、完整 OAuth、OpenAPI / 外部集合导入、multipart/文件上传、WebSocket 和秘密管理。当前聚焦个人 HTTP 调试核心工作流。
 
 ## 保留构想
 
@@ -104,6 +140,7 @@ CLI 与 AI Agent 接入暂缓：源码保留，桌面入口默认关闭，安装
 cargo check
 cargo test -p apibuddy-core
 cargo test -p apibuddy-app --lib
+cargo test -p apibuddy-webview
 cargo build --release -p apibuddy-app
 python3 scripts/package-macos.py
 ```

@@ -57,8 +57,10 @@ dependencies = [
  "nsh-platform-macos",
  "nsh-platform-windows",
  "nsh-testing",
+ "regex",
  "serde",
  "serde_json",
+ "url",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -78,6 +80,7 @@ dependencies = [
 name = "apibuddy-core"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "encoding_rs",
  "regex",
  "reqwest",

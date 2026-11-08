@@ -59,7 +59,7 @@ pub fn default_service() -> Service {
     Service {
         schema_version: 1,
         id: "default".into(),
-        name: "默认服务".into(),
+        name: "我的集合".into(),
         slug: "default".into(),
         description: "原有请求模板".into(),
         base_url: "https://httpbin.org".into(),

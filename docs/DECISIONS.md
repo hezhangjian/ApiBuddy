@@ -1,5 +1,11 @@
 # 技术决策
 
+## 2026-11-08：以个人 HTTP 调试闭环为主，NSH 分支更名为 dev
+
+按用户要求，当前 NSH 功能分支 在本地更名为 `dev`，原 dev 保留为 `dev-before-nsh-20261108`；用户明确要求旧 dev 仅保留本地、不推送。不切换 worktree，不改 main 或 Dioxus 实验，未提交或推送。取消这两个改名分支的旧 upstream 关联，避免误用旧远端目标。
+
+新请求无需预建服务，首次保存时选择集合。沿用已有 NSH 0.4.0、reqwest、Tokio、存储格式及双桌面入口，新增桌面草稿/本地历史文件，不迁移旧数据。补齐 Basic/API Key 与 Form 字段；不建设通用 GUI、多后端框架或插件体系。
+
 ## 2026-11-08：同时支持原生与 WebView 桌面
 
 用户明确要求保留原生版，同时增加具有完整本地能力的 WebView 版。本次不切换 GUI 框架；`apibuddy-app` 的 NSH Rust UI 编译为原生或 WASM，原生直接调用共享 Host，WebView 通过消息通道调用同一个 Host。reqwest/Tokio、文件与环境操作留在本地，页面只呈现和编辑。`apibuddy-webview` 使用 NSH 自己的 WebView 控件，少量 JS 负责传递结构化消息；不引入 React 或 Tauri。
@@ -10,11 +16,11 @@
 
 按用户最新要求，先提供本机可直接运行的 macOS `.app`。CLI 与 Agent Markdown 保留为后续构想，桌面入口默认关闭，创建服务时不再展示命令，安装包不携带 CLI。相关源码通过默认关闭的 `cli-integration` feature 保留，未删除。默认构建只选择桌面；交付打包默认使用 release，避免把含调试符号的开发包当作最终体积。
 
-## 2026-11-07：NSH 原生 Postman 核心工作台
+## 2026-11-07：NSH 原生 API 工作台
 
-按用户要求从 dev 切出 `feat/nsh-postman-core`，保留工作区已有未提交的 Rust 重写。桌面改用 Longbridge Native Shell（NSH）v0.4.0，固定提交 `e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3`；纯 Rust 模式关闭平台默认 js feature，macOS 使用 AppKit。此决定覆盖下方 GPUI 选型。固定 Rust 1.99.1 满足 NSH 使用的标准库 API，用户另授权更新本机 Rust 工具链。
+按用户要求从 dev 切出 NSH 功能分支，保留工作区已有未提交的 Rust 重写。桌面改用 Longbridge Native Shell（NSH）v0.4.0，固定提交 `e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3`；纯 Rust 模式关闭平台默认 js feature，macOS 使用 AppKit。此决定覆盖下方 GPUI 选型。固定 Rust 1.99.1 满足 NSH 使用的标准库 API，用户另授权更新本机 Rust 工具链。
 
-复用 apibuddy-core 的数据格式、存储、环境合并、请求执行及 CLI，不迁移用户库。主要范围为多标签、服务集合、参数/头/正文、Bearer 认证、环境编辑、响应查看、cURL 与会话历史；标签与历史暂不落盘，不宣称完整复刻 Postman。
+复用 apibuddy-core 的数据格式、存储、环境合并、请求执行及 CLI，不迁移用户库。主要范围为多标签、服务集合、参数/头/正文、Bearer 认证、环境编辑、响应查看、cURL 与会话历史；标签与历史暂不落盘，不宣称覆盖完整 API 协作平台。
 
 ## 2026-10-30：重写为 Rust + GPUI
 
@@ -30,7 +36,7 @@
 
 工作区与环境保存在普通 JSON 文件，沿用独立修订号、写锁、原子写入和大小限制；恢复允许保留还没输入完的变量名，不削弱发送和保存接口时的校验。响应仅留在运行中的标签内，不扩展为持久请求历史。环境值覆盖模板默认值，CLI 显式参数再覆盖环境；所选环境随 CLI 示例传递。
 
-cURL 仅作为单条 POSIX 命令文本解析，不执行 shell、不读取引用文件，未支持的行为明确拒绝。JSON 响应按文本呈现，可展开和定位，不执行远端内容。用户希望超过 Postman 是后续迭代方向，本次交付以具体能力与验证证据衡量。
+cURL 仅作为单条 POSIX 命令文本解析，不执行 shell、不读取引用文件，未支持的行为明确拒绝。JSON 响应按文本呈现，可展开和定位，不执行远端内容。后续持续改善个人 API 调试体验，本次交付以具体能力与验证证据衡量。
 
 ## 2026-10-26：main、dev 双 worktree
 

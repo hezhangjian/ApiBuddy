@@ -34,6 +34,6 @@ pub use services::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use store::{EnvironmentStore, ServiceStore, TemplateStore};
 pub use templates::{
-    METHODS, Method, Pair, RequestDraft, ResolvedRequest, SavedTemplate, TemplateInput, Variable,
-    new_template, referenced_variables,
+    Authentication, METHODS, Method, Pair, RequestDraft, ResolvedRequest, SavedTemplate,
+    TemplateInput, Variable, new_template, referenced_variables,
 };

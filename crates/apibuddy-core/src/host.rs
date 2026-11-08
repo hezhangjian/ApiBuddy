@@ -8,6 +8,7 @@ use serde_json::{Value, to_value};
 use std::{collections::HashMap, path::PathBuf, sync::mpsc::Receiver};
 
 pub struct Host {
+    desktop: crate::store::DesktopStore,
     services: ServiceStore,
     engine: Engine,
     next: u64,
@@ -17,6 +18,7 @@ pub struct Host {
 impl Host {
     pub fn new(root: PathBuf) -> Self {
         Self {
+            desktop: crate::store::DesktopStore::new(&root),
             services: ServiceStore::with_root(root),
             engine: Engine::new(),
             next: 0,
@@ -26,6 +28,12 @@ impl Host {
 
     pub fn call(&mut self, command: Command) -> Result<Value> {
         Ok(match command {
+            Command::History => to_value(self.desktop.history()?)?,
+            Command::AppendHistory { entry } => to_value(self.desktop.append_history(entry)?)?,
+            Command::Workspace { client } => to_value(self.desktop.workspace(&client)?)?,
+            Command::SaveWorkspace { client, data } => {
+                to_value(self.desktop.save_workspace(&client, data)?)?
+            }
             Command::Catalog => {
                 let c = self.services.list()?;
                 to_value(Catalog {

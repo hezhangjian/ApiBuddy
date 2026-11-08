@@ -1,5 +1,66 @@
 # 开发与验证
 
+## 2026-11-08：响应检查与代码收敛
+
+继续在 `dev` 开发，按用户要求将本轮及此前未提交的桌面迭代统一提交并推送至远端 `dev`；`dev-before-nsh-20261108` 仍仅保留本地，main 不变。清理当前文档中的外部产品对标措辞，并同步 `llms.txt` 的双桌面入口说明。
+
+- 响应查看独立到 `response.rs`，使用现有 NSH 只读代码编辑器，支持行号、JSON 着色与自动换行开关。查找支持字面 Unicode 文本、大小写开关、循环导航，按原文行号和 UTF-16 列定位。首次打开自动聚焦，搜索和查看条件随标签保留。
+- JSON Pointer 字段提取基于完整响应，支持数组、转义键名、根值和 `null`；缺失字段、非法路径和无效 JSON 分别提示。字段复制为完整 JSON，原响应复制保留原文。大正文先截取再分配预览字符串，响应计时更新不重复格式化或查找。
+- `cargo check --locked`、完整 Rust 回归 29 项、JS 消息桥 3 项通过；格式、diff 与 Python 语法检查通过。新增集成回归使用超过 270 KiB 的真实本机 HTTP 响应，验证查找、大小写、标签切换，以及预览范围外的字段提取和完整复制。
+- 原生实际验证：从 URL 输入框按 ⌘F 后获得查找焦点，中文命中经 Enter / ⌘G 切换到远处行并在视口中间高亮；行号与 JSON 着色正确。首次原生文本框方案存在滚动偏差，已由共享代码编辑器替换。
+- WebView 实际验证：同一中文关键词可滚动至第 413 行附近的第二处匹配；283,613 B JSON 响应提取 `/data/1/a~1b/~0name` 并复制后粘贴，中文和 emoji 一致。切换到字段时重建只读视图，避免 NSH 0.4 在长文档缩短后保留旧行号。
+- 临时测试应用已按用户要求收敛：本轮生成的 QA、QA2 包关闭并删除，最终仅保留 `dist/ApiBuddy.app` 和 `dist/ApiBuddy WebView.app`，测试使用系统临时数据目录。
+
+## 2026-11-08：正文切换保留与网络反馈迭代
+
+按用户要求继续在 `dev` 优化；`dev-before-nsh-20261108` 仅保留本地、不推送，本轮没有提交、推送或合并。
+
+- JSON / Text 与 Form 分别保留原始正文和字段草稿，来回切换不会把 JSON 解析成 Form，也不会丢失禁用字段；模板保存和工作区恢复均保留。Form 模式禁用 JSON 格式化。已有 URL-encoded cURL 首次切换 Form 时仍能解析，带 charset 的 Content-Type 也支持。
+- 超时输入保留小数秒，修复导入 1.5 秒显示成 1 秒；实际编辑 2.5 秒并发送慢请求，WebView 在约 2509 ms 显示超时。
+- 连接拒绝、中断和一般连接失败显示对应提示，避免回显底层错误中的 URL 参数；响应读取中断在流式及非流式模式保留已收到内容与字节数。响应提示支持换行。
+- `cargo check --locked`、24 项 Rust 测试、3 项 JS 消息桥测试、Rust 格式和 diff 检查通过。新增回归验证切换/保存/重启后禁用 Form 字段与原始正文保持独立，连接拒绝提示不泄露测试 URL，以及响应截断时保留中文和不完整 UTF-8 尾部。
+- 两个 release 包构建、打包成功，包内二进制哈希与 `target/release` 一致。实际测试使用临时目录、独立 QA Bundle ID 和本机随机端口，未操作日常数据或已安装 Dev 应用。
+- 原生：中文 JSON → Form 添加并禁用字段 → JSON 发送回显原始正文；保存后重启，Form 字段及禁用状态、原始正文全部恢复。截断响应可见提示并保留中文片段，连接拒绝提示正确。
+- WebView：读取原生保存的模板，恢复 Form 草稿并启用字段发送，中文及 `& +` 编码正确；切回 JSON 原文保留。截断响应保留中文；URL-encoded cURL 导入、切换 Form 和实际发送通过。两版截图检查正常，测试窗口已退出。
+
+本轮未扩大平台验证范围；真实拼音 IME、Windows/Linux 等边界沿用下文说明。
+
+## 2026-11-08：个人 HTTP 调试闭环 / 本地 dev
+
+当前 NSH 分支按用户要求更名为 `dev`，原 dev 保留为 `dev-before-nsh-20261108`，HEAD 仍为 `9b797f6`。保留本任务开始前的 AGENTS/README/Cargo/构建脚本/开发启动器修改；未提交、推送或合并，未改 main 和 Dioxus worktree。
+
+本轮补齐：空白临时请求、保存时选择或新建集合、请求重命名、Basic/Bearer/API Key、自动编码的 Form 字段、跨重启历史、自动保存多标签草稿与环境选择。保存对话框居中，保存/新建/关闭等快捷键可在输入框聚焦时使用。修复异步草稿保存完成状态可能早于最新编辑落盘的问题，最新快照未落盘时继续显示待保存。
+
+验证：
+
+- `cargo check --locked`，`cargo test --locked -p apibuddy-core -p apibuddy-app -p apibuddy-webview`：21 项通过；`node --test web/host.test.mjs`：3 项通过；`cargo fmt --all --check`、`git diff --check` 通过。
+- 新增回归覆盖旧模板缺少 auth/form 字段的兼容、认证变量替换后编码、Form 特殊字符/禁用字段、cURL 往返、未完成草稿恢复、两入口历史合并/最近 50 条/0600 权限、工作区修订冲突与损坏文件拒绝覆盖。工作台测试检查草稿实际落盘内容并重启恢复。
+- 使用系统临时数据目录和本机随机端口 HTTP fixture。原生实际 GET、参数启停、中文粘贴与回显、Basic 认证、cURL 导入中文 JSON POST、Form 特殊字符编码、Pretty/Raw/响应头、复制后粘贴均通过。
+- 原生慢请求取消、1 秒超时、HTTP 500、连接拒绝均有可见结果并进入历史；创建集合后保存、重命名、标签切换、最终 release 包重启恢复已保存请求与未保存 Form 草稿通过。恢复时不自动发送，响应正文为空。
+- 原生从 1360×900 缩小到约 1042×710，方法/URL/发送/保存与分区仍可用；实际检查响应滚动和历史滚动、历史搜索。自动化滚动方向受系统自然滚动设置影响，以截图内容和滚动条位置确认结果。
+- WebView 最终包读取原生历史，从历史恢复 Form 并发送 200；保存环境、选中 local、用 `{{base_url}}` 与 `{{token}}` 发送 API Key 请求，回显正确。保存到共享集合、取消慢请求、输入框内 ⌘S / ⌘Enter、导出 cURL 后粘贴回导入框验证本地剪贴板通过。重启后标签、local 环境、API Key 配置与已保存集合均恢复。
+- `cargo build --release -p apibuddy-app`、`python3 scripts/build-webview.py`、两个 `package-macos.py` 入口通过。包内二进制与 `target/release` 哈希一致。`dist/ApiBuddy.app` 约 32.0 MB，`dist/ApiBuddy WebView.app` 约 82.6 MB（含页面资源）。
+
+验证边界：中文粘贴、显示与 HTTP 回显已通过；本次键盘自动化未能可靠触发真实拼音候选窗口，不能宣称中文 IME 已验收。Windows/Linux、屏幕阅读器、多显示器、签名/公证未验证。草稿约 0.5 秒自动保存，立即强制退出仍有最后一次编辑丢失窗口；底栏显示保存失败时应保存需要保留的接口。
+
+## 2026-11-08：官方 NSH CLI 的 Rust 监听开发
+
+日常原生开发推荐项目固定版本的 `nsh run`；安装到 Dock 的独立开发包仍用 `./dev`。匹配版本 CLI 位于 `target/webview-tools/bin/nsh`，README 提供当前终端的 PATH 与开发数据目录设置。
+
+实际运行 `nsh run --target macos --port 0`，使用系统临时数据目录。UI 源文件变更事件触发自动重编和重启。发现固定 revision 的 `path_dependencies` 仅扫描显式 `path`，漏掉 `apibuddy-core.workspace = true`；改为等价的 `path = "../apibuddy-core"` 后，共享后端源文件事件也触发重编、重启（此次约 2 秒）。验证只改变源文件时间戳，没有改动 UI 或后端源码内容。Rust 运行器是重启，不保留未保存状态。
+
+`nsh check` 和 `cargo check --locked` 通过。CLI 生成的开发运行器与现有入口共用同一 App 根组件；没有用 `--target web` 替代自定义 WebView 桌面宿主。官方 CLI 开发会话在验证后停止。
+
+## 2026-11-08：一键开发安装与 Dock 更新
+
+新增仓库根目录 `./dev`，支持 `native`（默认）、`webview`、`both` 和 `--release`。应用安装到 `~/Applications/ApiBuddy Dev.app`、`~/Applications/ApiBuddy WebView Dev.app`，独立 Bundle ID；两版默认共享 `~/.apibuddy-dev`，数据路径随包保存，从 Dock 启动生效。`--data-dir` 可覆盖。
+
+构建和打包全部成功后才退出对应安装路径的旧开发版，正常退出后替换应用，注册 Launch Services 并启动；Dock 只添加缺失图标。退出等待直接检查 PID，避免 NSWorkspace 缓存列表导致误报。需要先保存未保存草稿，没有文件监听或热更新。
+
+本机验证：首次 `./dev both` 安装成功，两版均显示工作台；重复更新两版、再次执行默认 `./dev` 均成功，两个 Dock 图标各保留一个，已安装二进制与 debug 构建一致。共享开发数据目录已创建。后续无代码变化的原生重建重启约 0.6 秒；WebView 缓存编译各不到一秒，资源打包仍约 15 秒，时间仅代表本机此次实测。
+
+`cargo check --locked`、18 项 Rust 测试、3 项 JS 桥接测试、Rust 格式与 diff 检查通过。原有独立打包命令保留；WebView 构建新增 `--profile debug|release`，默认仍为 release。未提交或推送。
+
 ## 2026-11-08：原生与 WebView 双桌面入口
 
 原生版 `apibuddy-app` 与 WebView 版 `apibuddy-webview` 同时保留，共用 Rust UI/状态及 `apibuddy-core::host::Host`。Web 页面用项目固定 NSH revision 的工具打包，wasm-bindgen 固定为 0.2.130；WebView 使用 NSH 自带控件和消息通道，HTTP/存储/剪贴板由本地执行。
@@ -18,7 +79,7 @@
 
 ## 2026-11-07：Windows 构建交接
 
-按用户要求，将当前 Rust/NSH 实现通过 `feat/nsh-postman-core` 功能分支交接到另一台电脑，保持 CLI 默认关闭。README 补充 Windows MSVC 前置条件、PowerShell 克隆与 release 构建命令、exe 路径和隔离数据目录设置。
+按用户要求，将当前 Rust/NSH 实现通过 NSH 功能分支 功能分支交接到另一台电脑，保持 CLI 默认关闭。README 补充 Windows MSVC 前置条件、PowerShell 克隆与 release 构建命令、exe 路径和隔离数据目录设置。
 
 推送前修复共享核心中无条件引用 Unix 文件 API 的编译问题，权限设置仅在 Unix 启用；原子写入在重命名前关闭文件。用户目录改由标准库跨平台解析，Windows 使用 USERPROFILE/系统用户配置目录。路径测试改用系统临时目录；Windows 界面使用 Ctrl 快捷键提示及 Consolas 等宽字体。
 
@@ -33,9 +94,9 @@
 - 使用最终包内同一 release 二进制及临时数据目录进行原生交互验证：顶部无 CLI 入口，新建服务无命令预览；实际发送本机回显请求收到 200，查询参数及中文响应正确。
 - 本轮交付仍为本地 macOS arm64 构建，未做 Developer ID 签名、公证或正式安装。以下 CLI 验证记录属于暂缓前的历史状态。
 
-## 2026-11-07：NSH 原生 Postman 核心工作台
+## 2026-11-07：NSH 原生 API 工作台
 
-在 `feat/nsh-postman-core` 分支完成，本轮从 `dev` 切出并保留工作区已有的未提交 Rust 迁移。当前实现使用 Longbridge Native Shell v0.4.0，固定 Git revision；纯 Rust 模式由 AppKit 渲染。按用户授权，将本机 stable 工具链升级至 Rust 1.99.1，项目同时以 `rust-toolchain.toml` 固定该版本。
+在 NSH 功能分支 分支完成，本轮从 `dev` 切出并保留工作区已有的未提交 Rust 迁移。当前实现使用 Longbridge Native Shell v0.4.0，固定 Git revision；纯 Rust 模式由 AppKit 渲染。按用户授权，将本机 stable 工具链升级至 Rust 1.99.1，项目同时以 `rust-toolchain.toml` 固定该版本。
 
 - `cargo check`、`cargo test -p apibuddy-core`、`cargo test -p apibuddy-app --lib`、`cargo build -p apibuddy-app -p apibuddy-cli`、格式检查及 `git diff --check` 通过。共 14 项测试：6 项核心单元测试、4 项存储/真实 HTTP 集成测试、4 项 NSH 工作台交互测试。
 - 核心覆盖 cURL 转义与拒绝执行 shell/读取文件、环境合并与修订冲突、分块中文/emoji 解码、非 2xx 响应、取消、超时和 8 MiB 响应截断。工作台覆盖独立标签、保存重开、未保存关闭提示、对话框关闭后的状态存活、剪贴板导出、服务与环境，以及输入框获得焦点时的发送快捷键。
@@ -87,7 +148,7 @@
 - 解锁后完成最终 CLI/AI 原生复核：选择 local 的“查询订单”标签，接入面板及实际剪贴板 Markdown 均包含 `--environment 'local'`；命名接口和原始路径示例都继承该环境。仓库外执行桌面刚生成的 `apibuddy orders 查询订单 --environment local`，返回 200、`/orders?id=42` 和“本地回显成功”，桌面发送结果一致。`environments` 只列变量名。
 - 最终原生验收使用与 stable 安装包相同源码的 dev 构建。stable 打包成功，但其启动器的自动化窗口读取返回 `AXError.cannotComplete`，未把该结果当作安装包启动交互验收通过。未进行完整 IME、屏幕阅读器、Windows/Linux 或生产签名验证。
 
-构建与 QA 产物放在系统临时目录；旧测试进程及过期构建已清理；解锁后的最终 dev 测试窗口和本机回显服务保留供体验，使用独立临时数据目录。不能把临时产物存在视为正式安装或长期分发。产品仍缺少 OpenAPI 导入、持久请求历史、脚本断言、multipart 和秘密存储，不能据此宣称已全面超过 Postman。
+构建与 QA 产物放在系统临时目录；旧测试进程及过期构建已清理；解锁后的最终 dev 测试窗口和本机回显服务保留供体验，使用独立临时数据目录。不能把临时产物存在视为正式安装或长期分发。产品仍缺少 OpenAPI 导入、持久请求历史、脚本断言、multipart 和秘密存储，当前交付以已实现能力与验证证据为准。
 
 ## 环境
 

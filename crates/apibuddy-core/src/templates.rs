@@ -22,6 +22,37 @@ pub struct Variable {
     pub value: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum Authentication {
+    #[default]
+    Headers,
+    None,
+    Bearer {
+        token: String,
+    },
+    Basic {
+        username: String,
+        password: String,
+    },
+    ApiKey {
+        key: String,
+        value: String,
+        query: bool,
+    },
+}
+
+impl Authentication {
+    pub fn fields(&self) -> Vec<&str> {
+        match self {
+            Self::Headers | Self::None => vec![],
+            Self::Bearer { token } => vec![token],
+            Self::Basic { username, password } => vec![username, password],
+            Self::ApiKey { key, value, .. } => vec![key, value],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestDraft {
@@ -33,6 +64,13 @@ pub struct RequestDraft {
     pub variables: Vec<Variable>,
     pub timeout_ms: u64,
     pub stream: bool,
+    #[serde(default)]
+    pub auth: Authentication,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<Vec<Pair>>,
+    // Inactive Form editor contents; never included in the resolved request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_draft: Option<Vec<Pair>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -89,6 +127,9 @@ pub fn new_template() -> TemplateInput {
             }],
             timeout_ms: 30_000,
             stream: true,
+            auth: Authentication::default(),
+            form: None,
+            form_draft: None,
         },
     }
 }
@@ -116,6 +157,15 @@ pub fn validate_draft(draft: &RequestDraft) -> Result<RequestDraft> {
     }
     if draft.query.len() > 100 || draft.headers.len() > 100 || draft.variables.len() > 100 {
         return Err(Error::msg("查询参数、请求头或变量最多支持 100 项"));
+    }
+    if draft.auth.fields().iter().any(|v| v.len() > 16_384)
+        || draft.form.as_ref().is_some_and(|rows| rows.len() > 100)
+        || draft
+            .form_draft
+            .as_ref()
+            .is_some_and(|rows| rows.len() > 100)
+    {
+        return Err(Error::msg("认证值过长或 Form 字段超过 100 项"));
     }
 
     let mut keys = HashSet::new();
@@ -151,6 +201,17 @@ pub fn validate_draft(draft: &RequestDraft) -> Result<RequestDraft> {
         variables,
         timeout_ms: draft.timeout_ms,
         stream: draft.stream,
+        auth: draft.auth.clone(),
+        form: draft
+            .form
+            .as_ref()
+            .map(|rows| validate_pairs(rows, "Form 字段"))
+            .transpose()?,
+        form_draft: draft
+            .form_draft
+            .as_ref()
+            .map(|rows| validate_pairs(rows, "Form 草稿"))
+            .transpose()?,
     })
 }
 
@@ -197,16 +258,37 @@ pub fn validate_saved(value: &serde_json::Value) -> Result<SavedTemplate> {
 
 pub fn referenced_variables(draft: &RequestDraft) -> Vec<String> {
     let mut fields = vec![draft.url.as_str()];
+    fields.extend(draft.auth.fields());
     for row in draft.query.iter().filter(|row| row.enabled) {
         fields.push(&row.key);
         fields.push(&row.value);
     }
     for row in draft.headers.iter().filter(|row| row.enabled) {
+        let overridden = match &draft.auth {
+            Authentication::None | Authentication::Bearer { .. } | Authentication::Basic { .. } => {
+                row.key.eq_ignore_ascii_case("authorization")
+            }
+            Authentication::ApiKey {
+                key, query: false, ..
+            } => row.key.eq_ignore_ascii_case(key),
+            _ => false,
+        } || (draft.form.is_some()
+            && row.key.eq_ignore_ascii_case("content-type"));
+        if overridden {
+            continue;
+        }
         fields.push(&row.key);
         fields.push(&row.value);
     }
     if !matches!(draft.method.as_str(), "GET" | "HEAD") {
-        fields.push(&draft.body);
+        if let Some(form) = &draft.form {
+            for row in form.iter().filter(|r| r.enabled) {
+                fields.push(&row.key);
+                fields.push(&row.value);
+            }
+        } else {
+            fields.push(&draft.body);
+        }
     }
     let mut names = BTreeSet::new();
     for field in fields {

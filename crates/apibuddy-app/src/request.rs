@@ -2,12 +2,13 @@ use crate::{
     state::{RequestTab, Workbench},
     ui,
 };
-use apibuddy_core::{METHODS, Pair, Variable};
-use nsh_base::{SelectItem, theme};
+use apibuddy_core::{Authentication, METHODS, Pair, Variable};
+use nsh_base::SelectItem;
 use nsh_core::prelude::*;
 
 pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
-    let timeout = signal((tab.draft.with_untracked(|d| d.request.timeout_ms) / 1000).to_string());
+    let timeout =
+        signal((tab.draft.with_untracked(|d| d.request.timeout_ms) as f64 / 1000.0).to_string());
     view()
         .flex_1()
         .min_h(px(170.0))
@@ -27,9 +28,15 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                     .w(px(230.0)),
                 )
                 .child(
-                    ui::muted(move || tab.service.with(|s| format!("/ {}", s.name)))
-                        .flex_1()
-                        .number_of_lines(1),
+                    ui::muted(move || {
+                        if tab.saved.get().is_none() {
+                            "未保存 · 保存时选择集合".into()
+                        } else {
+                            tab.service.with(|s| format!("/ {}", s.name))
+                        }
+                    })
+                    .flex_1()
+                    .number_of_lines(1),
                 )
                 .child(
                     ui::choice(
@@ -124,14 +131,14 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .items_center()
                 .px_4()
                 .child(view().flex_1().child(ui::tabs(
-                    &["Params", "Headers", "Body", "认证", "变量", "设置"],
+                    &["Params", "Headers", "Body", "Authorization", "变量", "设置"],
                     tab.section,
                 )))
                 .child(ui::action("复制 cURL", move || store.copy_curl(tab))),
         )
         .child(dynamic(move || match tab.section.get() {
-            0 => pairs(tab, false).into_element(),
-            1 => pairs(tab, true).into_element(),
+            0 => pairs(tab, 0).into_element(),
+            1 => pairs(tab, 1).into_element(),
             2 => body(store, tab).into_element(),
             3 => auth(tab).into_element(),
             4 => variables(tab).into_element(),
@@ -142,9 +149,9 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
                 .child(
                     ui::field("超时秒数", timeout, move |value| {
                         timeout.set(value.to_string());
-                        let seconds = value.parse::<u64>().unwrap_or(0);
+                        let seconds = value.parse::<f64>().unwrap_or(0.0);
                         tab.draft
-                            .update(|d| d.request.timeout_ms = seconds.saturating_mul(1000));
+                            .update(|d| d.request.timeout_ms = (seconds * 1000.0).round() as u64);
                     })
                     .w(px(160.0)),
                 )
@@ -161,18 +168,27 @@ pub fn request_editor(store: Workbench, tab: RequestTab) -> impl IntoElement {
         }))
 }
 
-fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
+fn pair_rows(d: &apibuddy_core::RequestDraft, kind: usize) -> &[Pair] {
+    match kind {
+        1 => &d.headers,
+        2 => d.form.as_deref().unwrap_or_default(),
+        _ => &d.query,
+    }
+}
+fn pair_rows_mut(d: &mut apibuddy_core::RequestDraft, kind: usize) -> &mut Vec<Pair> {
+    match kind {
+        1 => &mut d.headers,
+        2 => d.form.get_or_insert_default(),
+        _ => &mut d.query,
+    }
+}
+
+fn pairs(tab: RequestTab, kind: usize) -> impl IntoElement {
     let rows = computed(move || {
-        tab.draft.with(|d| {
-            (0..if headers {
-                d.request.headers.len()
-            } else {
-                d.request.query.len()
-            })
-                .collect::<Vec<_>>()
-        })
+        tab.draft
+            .with(|d| (0..pair_rows(&d.request, kind).len()).collect::<Vec<_>>())
     });
-    let title = if headers { "请求头" } else { "查询参数" };
+    let title = ["查询参数", "请求头", "Form 字段"][kind];
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -185,21 +201,21 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                 .items_center()
                 .gap_2()
                 .child(
-                    ui::muted(if headers {
+                    ui::muted(if kind == 1 {
                         "Name / Value · 支持 {{变量}}"
                     } else {
-                        "参数会编码后追加到 URL，支持重复参数"
+                        if kind == 2 {
+                            "URL-encoded Form · 字段自动编码，支持重复字段"
+                        } else {
+                            "参数会编码后追加到 URL，支持重复参数"
+                        }
                     })
                     .flex_1(),
                 )
                 .child(
                     ui::action("+ 添加", move || {
                         tab.draft.update(|d| {
-                            let rows = if headers {
-                                &mut d.request.headers
-                            } else {
-                                &mut d.request.query
-                            };
+                            let rows = pair_rows_mut(&mut d.request, kind);
                             if rows.len() < 100 {
                                 rows.push(Pair {
                                     key: String::new(),
@@ -225,11 +241,7 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                         ui::action(
                             move || {
                                 tab.draft.with(|d| {
-                                    let rows = if headers {
-                                        &d.request.headers
-                                    } else {
-                                        &d.request.query
-                                    };
+                                    let rows = pair_rows(&d.request, kind);
                                     if rows.get(i).is_some_and(|r| r.enabled) {
                                         "☑"
                                     } else {
@@ -239,11 +251,7 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                             },
                             move || {
                                 tab.draft.update(|d| {
-                                    let rows = if headers {
-                                        &mut d.request.headers
-                                    } else {
-                                        &mut d.request.query
-                                    };
+                                    let rows = pair_rows_mut(&mut d.request, kind);
                                     if let Some(row) = rows.get_mut(i) {
                                         row.enabled = !row.enabled;
                                     }
@@ -254,28 +262,24 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                     )
                     .child(
                         ui::field(
-                            if headers {
+                            if kind == 1 {
                                 "请求头名称"
                             } else {
-                                "参数名称"
+                                if kind == 2 {
+                                    "Form 名称"
+                                } else {
+                                    "参数名称"
+                                }
                             },
                             move || {
                                 tab.draft.with(|d| {
-                                    let rows = if headers {
-                                        &d.request.headers
-                                    } else {
-                                        &d.request.query
-                                    };
+                                    let rows = pair_rows(&d.request, kind);
                                     rows.get(i).map(|r| r.key.clone()).unwrap_or_default()
                                 })
                             },
                             move |value| {
                                 tab.draft.update(|d| {
-                                    let rows = if headers {
-                                        &mut d.request.headers
-                                    } else {
-                                        &mut d.request.query
-                                    };
+                                    let rows = pair_rows_mut(&mut d.request, kind);
                                     if let Some(row) = rows.get_mut(i) {
                                         row.key = value.into();
                                     }
@@ -287,24 +291,20 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                     )
                     .child(
                         ui::field(
-                            if headers { "请求头值" } else { "参数值" },
+                            if kind == 1 {
+                                "请求头值"
+                            } else {
+                                if kind == 2 { "Form 值" } else { "参数值" }
+                            },
                             move || {
                                 tab.draft.with(|d| {
-                                    let rows = if headers {
-                                        &d.request.headers
-                                    } else {
-                                        &d.request.query
-                                    };
+                                    let rows = pair_rows(&d.request, kind);
                                     rows.get(i).map(|r| r.value.clone()).unwrap_or_default()
                                 })
                             },
                             move |value| {
                                 tab.draft.update(|d| {
-                                    let rows = if headers {
-                                        &mut d.request.headers
-                                    } else {
-                                        &mut d.request.query
-                                    };
+                                    let rows = pair_rows_mut(&mut d.request, kind);
                                     if let Some(row) = rows.get_mut(i) {
                                         row.value = value.into();
                                     }
@@ -317,11 +317,7 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
                     .child(
                         ui::action("×", move || {
                             tab.draft.update(|d| {
-                                let rows = if headers {
-                                    &mut d.request.headers
-                                } else {
-                                    &mut d.request.query
-                                };
+                                let rows = pair_rows_mut(&mut d.request, kind);
                                 if i < rows.len() {
                                     rows.remove(i);
                                 }
@@ -334,6 +330,7 @@ fn pairs(tab: RequestTab, headers: bool) -> impl IntoElement {
 }
 
 fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
+    let form_mode = computed(move || tab.draft.with(|d| d.request.form.is_some()));
     view()
         .flex_1()
         .min_h(px(0.0))
@@ -350,42 +347,50 @@ fn body(store: Workbench, tab: RequestTab) -> impl IntoElement {
                         tab.draft.with(|d| {
                             if matches!(d.request.method.as_str(), "GET" | "HEAD") {
                                 "GET / HEAD 不发送正文"
+                            } else if d.request.form.is_some() {
+                                "Form 字段 · 切换模式保留草稿"
                             } else {
-                                "原始正文 · 支持 {{变量}}"
+                                "原始正文 · 支持 {{变量}} · 切换模式保留草稿"
                             }
                         })
                     })
                     .flex_1(),
                 )
                 .child(ui::action("JSON", move || {
-                    set_header(tab, "Content-Type", "application/json")
+                    set_body_type(tab, "application/json")
                 }))
-                .child(ui::action("Text", move || {
-                    set_header(tab, "Content-Type", "text/plain")
-                }))
+                .child(ui::action("Text", move || set_body_type(tab, "text/plain")))
                 .child(ui::action("Form", move || {
-                    set_header(tab, "Content-Type", "application/x-www-form-urlencoded")
+                    set_body_type(tab, "application/x-www-form-urlencoded")
                 }))
-                .child(ui::action(
-                    "格式化",
-                    move || match serde_json::from_str::<serde_json::Value>(
-                        &tab.draft.with_untracked(|d| d.request.body.clone()),
-                    ) {
-                        Ok(json) => tab.draft.update(|d| {
-                            d.request.body = serde_json::to_string_pretty(&json).unwrap_or_default()
-                        }),
-                        Err(error) => store.notice.set(format!("JSON 格式错误：{error}")),
-                    },
-                )),
+                .child(
+                    ui::action("格式化", move || {
+                        match serde_json::from_str::<serde_json::Value>(
+                            &tab.draft.with_untracked(|d| d.request.body.clone()),
+                        ) {
+                            Ok(json) => tab.draft.update(|d| {
+                                d.request.body =
+                                    serde_json::to_string_pretty(&json).unwrap_or_default()
+                            }),
+                            Err(error) => store.notice.set(format!("JSON 格式错误：{error}")),
+                        }
+                    })
+                    .disabled(move || form_mode.get()),
+                ),
         )
-        .child(
-            ui::editor(
-                "请求正文",
-                move || tab.draft.with(|d| d.request.body.clone()),
-                move |value| tab.draft.update(|d| d.request.body = value.into()),
-            )
-            .placeholder("{\n  \"name\": \"ApiBuddy\"\n}"),
-        )
+        .child(dynamic(move || {
+            if form_mode.get() {
+                pairs(tab, 2).into_element()
+            } else {
+                ui::editor(
+                    "请求正文",
+                    move || tab.draft.with(|d| d.request.body.clone()),
+                    move |value| tab.draft.update(|d| d.request.body = value.into()),
+                )
+                .placeholder("输入 JSON 或文本正文")
+                .into_element()
+            }
+        }))
 }
 
 pub fn set_header(tab: RequestTab, name: &str, value: &str) {
@@ -404,49 +409,179 @@ pub fn set_header(tab: RequestTab, name: &str, value: &str) {
 }
 
 fn auth(tab: RequestTab) -> impl IntoElement {
-    view()
-        .flex_1()
-        .p_4()
-        .gap_3()
-        .child(ui::label("Bearer Token"))
-        .child(
-            ui::field(
-                "Bearer Token",
+    let mode = move || {
+        tab.draft.with(|d| {
+            match d.request.auth {
+                Authentication::Headers => "headers",
+                Authentication::None => "none",
+                Authentication::Bearer { .. } => "bearer",
+                Authentication::Basic { .. } => "basic",
+                Authentication::ApiKey { .. } => "key",
+            }
+            .to_string()
+        })
+    };
+    let auth_kind = computed(move || {
+        tab.draft.with(|d| match d.request.auth {
+            Authentication::Bearer { .. } => 1,
+            Authentication::Basic { .. } => 2,
+            Authentication::ApiKey { .. } => 3,
+            _ => 0,
+        })
+    });
+    scroll().flex_1().child(
+        view()
+            .p_4()
+            .gap_3()
+            .child(ui::choice(
+                "认证方式",
                 move || {
-                    tab.draft.with(|d| {
-                        d.request
-                            .headers
-                            .iter()
-                            .find(|h| h.key.eq_ignore_ascii_case("authorization"))
-                            .map(|h| {
-                                h.value
-                                    .strip_prefix("Bearer ")
-                                    .unwrap_or(&h.value)
-                                    .to_string()
-                            })
-                            .unwrap_or_default()
+                    vec![
+                        SelectItem::new("headers", "手动 Headers / 导入的认证"),
+                        SelectItem::new("none", "No Auth"),
+                        SelectItem::new("bearer", "Bearer Token"),
+                        SelectItem::new("basic", "Basic Auth"),
+                        SelectItem::new("key", "API Key"),
+                    ]
+                },
+                mode,
+                move || {
+                    match mode().as_str() {
+                        "none" => "No Auth",
+                        "bearer" => "Bearer Token",
+                        "basic" => "Basic Auth",
+                        "key" => "API Key",
+                        _ => "手动 Headers / 导入的认证",
+                    }
+                    .into()
+                },
+                move |mode| {
+                    tab.draft.update(|d| {
+                        d.request.auth = match mode.as_str() {
+                            "none" => Authentication::None,
+                            "bearer" => Authentication::Bearer {
+                                token: String::new(),
+                            },
+                            "basic" => Authentication::Basic {
+                                username: String::new(),
+                                password: String::new(),
+                            },
+                            "key" => Authentication::ApiKey {
+                                key: "X-API-Key".into(),
+                                value: String::new(),
+                                query: false,
+                            },
+                            _ => Authentication::Headers,
+                        }
                     })
                 },
-                move |value| {
-                    set_header(
-                        tab,
-                        "Authorization",
-                        &if value.is_empty() {
-                            String::new()
-                        } else {
-                            format!("Bearer {value}")
-                        },
+            ))
+            .child(dynamic(move || {
+                // Depend only on the variant so typing does not reconstruct the focused input.
+                match auth_kind.get() {
+                    1 => view()
+                        .gap_2()
+                        .child(ui::label("Bearer Token"))
+                        .child(auth_field(tab, "Bearer Token", 0))
+                        .into_element(),
+                    2 => view()
+                        .gap_2()
+                        .child(ui::label("用户名"))
+                        .child(auth_field(tab, "Basic 用户名", 0))
+                        .child(ui::label("密码"))
+                        .child(auth_field(tab, "Basic 密码", 1))
+                        .into_element(),
+                    3 => view()
+                        .gap_2()
+                        .child(ui::label("Key / Value"))
+                        .child(auth_field(tab, "API Key 名称", 0))
+                        .child(auth_field(tab, "API Key 值", 1))
+                        .child(ui::choice(
+                            "API Key 位置",
+                            move || {
+                                vec![
+                                    SelectItem::new("header", "Header"),
+                                    SelectItem::new("query", "Query Params"),
+                                ]
+                            },
+                            move || {
+                                tab.draft.with(|d| {
+                                    if matches!(
+                                        d.request.auth,
+                                        Authentication::ApiKey { query: true, .. }
+                                    ) {
+                                        "query"
+                                    } else {
+                                        "header"
+                                    }
+                                    .into()
+                                })
+                            },
+                            move || {
+                                tab.draft.with(|d| {
+                                    if matches!(
+                                        d.request.auth,
+                                        Authentication::ApiKey { query: true, .. }
+                                    ) {
+                                        "Query Params"
+                                    } else {
+                                        "Header"
+                                    }
+                                    .into()
+                                })
+                            },
+                            move |value| {
+                                tab.draft.update(|d| {
+                                    if let Authentication::ApiKey { query, .. } =
+                                        &mut d.request.auth
+                                    {
+                                        *query = value == "query";
+                                    }
+                                })
+                            },
+                        ))
+                        .into_element(),
+                    _ => ui::muted(
+                        "手动模式使用 Headers 中的认证；No Auth 发送时移除 Authorization。",
                     )
-                },
-            )
-            .placeholder("{{token}}"),
-        )
-        .child(ui::muted(
-            "可填写环境变量 {{token}}。Basic、API Key 等认证可在 Headers 中填写。",
-        ))
-        .child(view().flex_row().child(ui::action("移除认证", move || {
-            set_header(tab, "Authorization", "")
-        })))
+                    .into_element(),
+                }
+            }))
+            .child(ui::muted(
+                "支持 {{变量}}，发送时解析。认证信息随请求明文保存在本机。",
+            )),
+    )
+}
+
+fn auth_field(tab: RequestTab, name: &'static str, index: usize) -> impl IntoElement {
+    ui::field(
+        name,
+        move || {
+            tab.draft.with(|d| {
+                d.request
+                    .auth
+                    .fields()
+                    .get(index)
+                    .copied()
+                    .unwrap_or_default()
+                    .to_string()
+            })
+        },
+        move |value| {
+            tab.draft.update(|d| match &mut d.request.auth {
+                Authentication::Bearer { token } => *token = value.into(),
+                Authentication::Basic { username, password } => {
+                    *if index == 0 { username } else { password } = value.into()
+                }
+                Authentication::ApiKey { key, value: v, .. } => {
+                    *if index == 0 { key } else { v } = value.into()
+                }
+                _ => {}
+            })
+        },
+    )
+    .masked(name == "Basic 密码")
+    .placeholder("支持 {{变量}}")
 }
 
 fn variables(tab: RequestTab) -> impl IntoElement {
@@ -544,86 +679,37 @@ fn variables(tab: RequestTab) -> impl IntoElement {
         ))))
 }
 
-pub fn response_view(store: Workbench, tab: RequestTab) -> impl IntoElement {
-    let section = signal(0);
-    let content = computed(move || {
-        tab.content_version.get();
-        let selected = section.get();
-        tab.response.with_untracked(|r| {
-            let value = match selected {
-                2 => r.headers.clone(),
-                0 if !r.running && r.body.len() <= 256 * 1024 => {
-                    serde_json::from_str::<serde_json::Value>(&r.body)
-                        .ok()
-                        .and_then(|v| serde_json::to_string_pretty(&v).ok())
-                        .unwrap_or_else(|| r.body.clone())
-                }
-                _ => r.body.clone(),
-            };
-            if value.len() > 256 * 1024 {
-                let end = value.floor_char_boundary(256 * 1024);
-                format!(
-                    "{}\n\n[界面显示前 256 KiB；复制响应可获得完整内容]",
-                    &value[..end]
-                )
-            } else {
-                value
-            }
-        })
-    });
-    view()
-        .flex_1()
-        .min_h(px(120.0))
-        .border_t_1()
-        .border_color(|| theme().border)
-        .child(
-            view()
-                .h(px(40.0))
-                .flex_row()
-                .items_center()
-                .gap_3()
-                .px_4()
-                .bg(|| theme().secondary)
-                .child(ui::label("响应").font_weight(FontWeight::SEMIBOLD))
-                .child(
-                    ui::label(move || {
-                        tab.response.with(|r| {
-                            if r.message.is_empty() {
-                                "等待发送".into()
-                            } else {
-                                r.message.clone()
-                            }
+fn set_body_type(tab: RequestTab, content_type: &str) {
+    tab.draft.update(|d| {
+        if content_type == "application/x-www-form-urlencoded" {
+            if d.request.form.is_none() {
+                let imported_form = d.request.headers.iter().any(|row| {
+                    row.enabled
+                        && row.key.eq_ignore_ascii_case("content-type")
+                        && row
+                            .value
+                            .split(';')
+                            .next()
+                            .unwrap_or_default()
+                            .trim()
+                            .eq_ignore_ascii_case("application/x-www-form-urlencoded")
+                });
+                d.request.form = Some(d.request.form_draft.take().unwrap_or_else(|| {
+                    if !imported_form {
+                        return vec![];
+                    }
+                    url::form_urlencoded::parse(d.request.body.as_bytes())
+                        .map(|(key, value)| Pair {
+                            key: key.into_owned(),
+                            value: value.into_owned(),
+                            enabled: true,
                         })
-                    })
-                    .flex_1()
-                    .number_of_lines(1),
-                )
-                .child(ui::muted(move || {
-                    tab.response
-                        .with(|r| format!("{} ms  ·  {} B", r.elapsed, r.bytes))
-                }))
-                .child(ui::action("复制响应", move || {
-                    let value = tab.response.with_untracked(|r| {
-                        if section.get_untracked() == 2 {
-                            r.headers.clone()
-                        } else {
-                            r.body.clone()
-                        }
-                    });
-                    crate::backend::copy_text(value);
-                    store.notice.set("响应已复制".into());
-                })),
-        )
-        .child(
-            view()
-                .px_4()
-                .child(ui::tabs(&["Pretty", "Raw", "响应头"], section)),
-        )
-        .child(
-            view().flex_1().min_h(px(0.0)).px_4().py_2().child(
-                ui::editor("响应内容", move || content.get(), |_| {})
-                    .readonly(true)
-                    .placeholder("发送请求后查看响应正文、状态码、耗时和大小"),
-            ),
-        )
+                        .collect()
+                }));
+            }
+        } else if let Some(form) = d.request.form.take() {
+            d.request.form_draft = Some(form);
+        }
+    });
+    set_header(tab, "Content-Type", content_type);
 }

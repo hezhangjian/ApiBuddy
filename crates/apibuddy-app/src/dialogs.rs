@@ -15,7 +15,88 @@ pub fn dialogs(store: Workbench) -> impl IntoElement {
         #[cfg(feature = "cli-integration")]
         Dialog::Agent => agent(store).into_element(),
         Dialog::Close(id) => close(store, id).into_element(),
+        Dialog::Save { id, copy, close } => save(store, id, copy, close).into_element(),
     })
+}
+
+fn save(store: Workbench, id: u64, copy: bool, close: bool) -> impl IntoElement {
+    let tab = store
+        .tabs
+        .with_untracked(|tabs| tabs.iter().find(|t| t.id == id).copied());
+    let name = signal(
+        tab.map(|t| t.draft.get_untracked().name)
+            .unwrap_or_default(),
+    );
+    let selected = signal(
+        tab.map(|t| {
+            if t.saved.get_untracked().is_some() {
+                t.service.get_untracked().id
+            } else {
+                store.selected_service.get_untracked()
+            }
+        })
+        .unwrap_or_default(),
+    );
+    let new_name = signal(String::new());
+    panel(
+        store,
+        "保存到集合",
+        view()
+            .gap_3()
+            .child(ui::label("请求名称（修改名称后保存即可重命名）"))
+            .child(ui::field("保存名称", name, move |v| name.set(v.into())))
+            .child(ui::label("选择集合"))
+            .child(ui::choice(
+                "保存集合",
+                move || {
+                    let mut items = store.catalog.with(|c| {
+                        c.iter()
+                            .map(|s| SelectItem::new(s.id.clone(), s.name.clone()))
+                            .collect::<Vec<_>>()
+                    });
+                    items.push(SelectItem::new("new", "+ 新建集合"));
+                    items
+                },
+                move || selected.get(),
+                move || {
+                    if selected.get() == "new" {
+                        "+ 新建集合".into()
+                    } else {
+                        store.catalog.with(|c| {
+                            c.iter()
+                                .find(|s| s.id == selected.get())
+                                .map(|s| s.name.clone())
+                                .unwrap_or_default()
+                        })
+                    }
+                },
+                move |id| selected.set(id),
+            ))
+            .child(when(
+                move || selected.get() == "new",
+                move || {
+                    ui::field("新集合名称", new_name, move |v| new_name.set(v.into()))
+                        .placeholder("例如：本地调试")
+                },
+            ))
+            .child(ui::primary("保存到集合", move || {
+                if let Some(tab) = tab {
+                    if selected.get_untracked() == "new" {
+                        store.save_new_collection(
+                            tab,
+                            new_name.get_untracked(),
+                            name.get_untracked(),
+                            close,
+                            selected,
+                        );
+                    } else if let Some(destination) = store.catalog.with_untracked(|c| {
+                        c.iter().find(|s| s.id == selected.get_untracked()).cloned()
+                    }) {
+                        store.save_to(tab, destination, name.get_untracked(), copy, close);
+                    }
+                }
+            })),
+    )
 }
 
 fn panel(store: Workbench, title: &'static str, content: impl IntoElement) -> impl IntoElement {
@@ -23,31 +104,40 @@ fn panel(store: Workbench, title: &'static str, content: impl IntoElement) -> im
         .on_cancel(move || store.dialog.set(Dialog::None))
         .child(
             view()
-                .w(px(650.0))
-                .max_h(px(720.0))
-                .p_5()
-                .gap_4()
-                .rounded(px(10.0))
-                .bg(|| theme().background)
-                .border_1()
-                .border_color(|| theme().border)
+                .flex_1()
+                .bg(rgba(0x00000066))
+                .items_center()
+                .justify_center()
+                .p_4()
                 .child(
                     view()
-                        .flex_row()
-                        .items_center()
+                        .w(px(650.0))
+                        .max_w(percentage(1.0))
+                        .max_h(px(720.0))
+                        .p_5()
+                        .gap_4()
+                        .rounded(px(10.0))
+                        .bg(|| theme().background)
+                        .border_1()
+                        .border_color(|| theme().border)
                         .child(
-                            ui::label(title)
-                                .text_size(px(18.0))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .flex_1(),
+                            view()
+                                .flex_row()
+                                .items_center()
+                                .child(
+                                    ui::label(title)
+                                        .text_size(px(18.0))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .flex_1(),
+                                )
+                                .child(
+                                    ui::action("×", move || store.dialog.set(Dialog::None))
+                                        .accessibility_label("关闭对话框"),
+                                ),
                         )
-                        .child(
-                            ui::action("×", move || store.dialog.set(Dialog::None))
-                                .accessibility_label("关闭对话框"),
-                        ),
-                )
-                .child(content)
-                .child(ui::muted(move || store.notice.get()).number_of_lines(3)),
+                        .child(content)
+                        .child(ui::muted(move || store.notice.get()).number_of_lines(3)),
+                ),
         )
 }
 
@@ -57,20 +147,19 @@ fn service(store: Workbench) -> impl IntoElement {
     let base = signal(String::new());
     panel(
         store,
-        "新建服务",
+        "新建集合",
         view()
             .gap_3()
             .child(ui::label("名称"))
             .child(ui::field("服务名称", name, move |v| name.set(v.into())).placeholder("订单服务"))
-            .child(ui::label("服务 ID"))
+            .child(ui::label("标识（可选，留空自动生成）"))
             .child(ui::field("服务 ID", slug, move |v| slug.set(v.into())).placeholder("orders"))
-            .child(ui::muted("用于区分服务的唯一标识，例如 orders。"))
-            .child(ui::label("基础地址"))
+            .child(ui::label("基础地址（可选，用于 {{base_url}}）"))
             .child(
                 ui::field("服务地址", base, move |v| base.set(v.into()))
                     .placeholder("http://127.0.0.1:42427"),
             )
-            .child(ui::primary("创建服务", move || {
+            .child(ui::primary("创建集合", move || {
                 store.create_service(ServiceInput {
                     name: name.get_untracked(),
                     slug: slug.get_untracked(),

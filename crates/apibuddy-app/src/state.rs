@@ -6,7 +6,7 @@ use apibuddy_core::cli;
 use apibuddy_core::{
     Environments, Event, Outcome, SavedTemplate, Service, ServiceInput, TemplateInput, curl,
     default_service, empty_environments, new_template,
-    protocol::{Catalog, Command, Events, Library},
+    protocol::{Catalog, Command, DraftTab, Events, HistoryEntry, Library, Workspace},
 };
 use nsh_core::{prelude::*, time::Instant};
 use std::{
@@ -17,12 +17,13 @@ use std::{
 #[derive(Clone, Copy)]
 pub struct RequestTab {
     pub id: u64,
-    pub service: Stored<Service>,
+    pub service: Signal<Service>,
     pub draft: Signal<TemplateInput>,
     pub baseline: Signal<TemplateInput>,
     pub saved: Signal<Option<(String, u64)>>,
     pub environment: Signal<Option<String>>,
     pub response: Signal<Response>,
+    pub response_view: crate::response::ResponseView,
     pub section: Signal<usize>,
     pub content_version: Signal<u64>,
 }
@@ -44,15 +45,6 @@ pub struct Response {
     pub message: String,
 }
 
-#[derive(Clone, PartialEq)]
-pub struct HistoryEntry {
-    pub id: u64,
-    pub service: Service,
-    pub input: TemplateInput,
-    pub environment: Option<String>,
-    pub summary: String,
-}
-
 struct Running {
     operation: Option<u64>,
     cancelled: bool,
@@ -71,6 +63,11 @@ pub enum Dialog {
     #[cfg(feature = "cli-integration")]
     Agent,
     Close(u64),
+    Save {
+        id: u64,
+        copy: bool,
+        close: bool,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -89,6 +86,11 @@ pub struct Workbench {
     pub dialog: Signal<Dialog>,
     #[cfg(feature = "cli-integration")]
     pub agent_text: Signal<String>,
+    pub recovery_status: Signal<String>,
+    recovery_ready: Signal<bool>,
+    workspace_pending: Stored<Option<Workspace>>,
+    workspace_last: Stored<Workspace>,
+    workspace_busy: Stored<bool>,
     next_id: Stored<u64>,
     polling: Stored<bool>,
     saving: Stored<HashSet<u64>>,
@@ -115,6 +117,11 @@ impl Workbench {
             dialog: signal(Dialog::None),
             #[cfg(feature = "cli-integration")]
             agent_text: signal(String::new()),
+            recovery_status: signal("正在恢复草稿…".into()),
+            recovery_ready: signal(false),
+            workspace_pending: stored(None),
+            workspace_last: stored(Workspace::default()),
+            workspace_busy: stored(false),
             next_id: stored(0),
             polling: stored(false),
             saving: stored(HashSet::new()),
@@ -124,10 +131,163 @@ impl Workbench {
             owner: Owner::current(),
         };
         this.reload();
-        this.new_request();
+        this.restore();
+        effect(move || {
+            if this.recovery_ready.get() {
+                let data = this.snapshot();
+                let changed = this.workspace_last.with(|last| *last != data);
+                if changed {
+                    this.workspace_pending.with(|p| *p = Some(data));
+                    this.recovery_status.set("草稿待保存…".into());
+                }
+            }
+        });
+        set_interval(std::time::Duration::from_millis(500), move || {
+            this.persist_workspace()
+        });
         set_interval(std::time::Duration::from_millis(50), move || this.poll());
         cleanup(move || this.running.with(|running| running.clear()));
         this
+    }
+
+    fn client() -> String {
+        if cfg!(target_arch = "wasm32") {
+            "webview"
+        } else {
+            "native"
+        }
+        .into()
+    }
+
+    fn snapshot(self) -> Workspace {
+        let tabs = self.tabs.get();
+        Workspace {
+            schema_version: 1,
+            revision: self.workspace_last.with(|w| w.revision),
+            active: tabs
+                .iter()
+                .position(|t| t.id == self.active.get())
+                .unwrap_or(0),
+            selected_service: self.selected_service.get(),
+            tabs: tabs
+                .iter()
+                .map(|t| DraftTab {
+                    service: t.service.get(),
+                    input: t.draft.get(),
+                    baseline: t.baseline.get(),
+                    saved: t.saved.get(),
+                    environment: t.environment.get(),
+                    section: t.section.get(),
+                })
+                .collect(),
+        }
+    }
+
+    fn restore(self) {
+        self.task(async move {
+            match self
+                .backend()
+                .call::<Vec<HistoryEntry>>(Command::History)
+                .await
+            {
+                Ok(entries) => self.history.set(entries),
+                Err(e) => self.notice.set(format!("历史读取失败：{e}")),
+            }
+            let loaded = self
+                .backend()
+                .call::<Workspace>(Command::Workspace {
+                    client: Self::client(),
+                })
+                .await;
+            let can_save = loaded.is_ok();
+            match loaded {
+                Ok(data) => {
+                    for draft in &data.tabs {
+                        self.open(
+                            draft.service.clone(),
+                            draft.input.clone(),
+                            draft.saved.clone(),
+                            draft.environment.clone(),
+                        );
+                        if let Some(tab) = self.current() {
+                            tab.baseline.set(draft.baseline.clone());
+                            tab.section.set(draft.section.min(5));
+                        }
+                    }
+                    if let Some(tab) = self
+                        .tabs
+                        .with_untracked(|tabs| tabs.get(data.active).copied())
+                    {
+                        self.activate(tab);
+                    }
+                    self.select_service(data.selected_service.clone());
+                    self.workspace_last.with(|last| *last = data);
+                    self.recovery_status.set("草稿已恢复".into());
+                }
+                Err(e) => self
+                    .recovery_status
+                    .set(format!("草稿恢复失败，原文件保留：{e}")),
+            }
+            if self.tabs.with_untracked(Vec::is_empty) {
+                self.new_request();
+            }
+            self.recovery_ready.set(can_save);
+        });
+    }
+
+    fn persist_workspace(self) {
+        if self.workspace_busy.with(|b| *b) || !self.recovery_ready.get_untracked() {
+            return;
+        }
+        let Some(mut data) = self.workspace_pending.with(Option::take) else {
+            return;
+        };
+        data.revision = self.workspace_last.with(|w| w.revision);
+        self.workspace_busy.with(|b| *b = true);
+        self.task(async move {
+            let result = self
+                .backend()
+                .call::<Workspace>(Command::SaveWorkspace {
+                    client: Self::client(),
+                    data,
+                })
+                .await;
+            self.workspace_busy.with(|b| *b = false);
+            match result {
+                Ok(data) => {
+                    self.workspace_last.with(|last| *last = data);
+                    let current = untracked(|| self.snapshot());
+                    if self.workspace_last.with(|last| *last != current) {
+                        self.workspace_pending.with(|p| *p = Some(current));
+                        self.recovery_status.set("草稿待保存…".into());
+                    } else {
+                        self.workspace_pending.with(|p| *p = None);
+                        self.recovery_status.set("草稿已保存在本机".into());
+                    }
+                }
+                Err(e) => {
+                    self.recovery_ready.set(false);
+                    self.recovery_status.set(format!("草稿自动保存已停止：{e}"));
+                }
+            }
+        });
+    }
+
+    fn record_history(self, entry: HistoryEntry) {
+        self.history.update(|h| {
+            h.insert(0, entry.clone());
+            h.truncate(50);
+        });
+        self.task(async move {
+            match self
+                .backend()
+                .call::<Vec<HistoryEntry>>(Command::AppendHistory { entry })
+                .await
+            {
+                Ok(entries) => self.history.set(entries),
+                Err(e) => self.notice.set(format!("历史保存失败：{e}")),
+            }
+        });
     }
 
     fn id(self) -> u64 {
@@ -199,7 +359,11 @@ impl Workbench {
                         self.notice.set(library.warnings.join("；"));
                     }
                     self.library.set(library.templates);
-                    self.environments.set(library.environments);
+                    if self.current().is_none_or(|t| {
+                        t.service.get_untracked().id == self.selected_service.get_untracked()
+                    }) {
+                        self.environments.set(library.environments);
+                    }
                 }
                 Err(e) => {
                     self.library.set(Vec::new());
@@ -221,6 +385,31 @@ impl Workbench {
             self.select_service(service);
         }
         self.active.set(tab.id);
+        self.reload_environments(tab);
+    }
+
+    fn reload_environments(self, tab: RequestTab) {
+        let service = tab.service.get_untracked().id;
+        self.environments.set(empty_environments());
+        self.task(async move {
+            match self
+                .backend()
+                .call::<Library>(Command::Load {
+                    service: service.clone(),
+                })
+                .await
+            {
+                Ok(library)
+                    if self.current().is_some_and(|t| {
+                        t.id == tab.id && t.service.get_untracked().id == service
+                    }) =>
+                {
+                    self.environments.set(library.environments)
+                }
+                Err(e) => self.notice.set(e.to_string()),
+                _ => {}
+            }
+        });
     }
 
     pub fn open(
@@ -254,12 +443,13 @@ impl Workbench {
         // Signals belong to the workbench owner, even when invoked from a temporary dialog.
         let tab = self.owner.run(|| RequestTab {
             id: self.id(),
-            service: stored(service),
+            service: signal(service),
             draft: signal(input.clone()),
             baseline: signal(input),
             saved: signal(saved),
             environment: signal(environment),
             response: signal(Response::default()),
+            response_view: crate::response::ResponseView::new(),
             section: signal(0),
             content_version: signal(0),
         });
@@ -271,8 +461,14 @@ impl Workbench {
         let service = self.service();
         let mut input = new_template();
         input.name = "未命名请求".into();
-        input.request.url = "{{base_url}}/get".into();
-        input.request.variables[0].value = service.base_url.clone();
+        input.request.url.clear();
+        input.request.variables.clear();
+        if !service.base_url.is_empty() && service.id != "default" {
+            input.request.variables.push(apibuddy_core::Variable {
+                key: "base_url".into(),
+                value: service.base_url.clone(),
+            });
+        }
         self.open(service, input, None, None);
     }
 
@@ -290,23 +486,59 @@ impl Workbench {
     }
 
     pub fn save(self, tab: RequestTab, copy: bool) {
-        self.save_then(tab, copy, false);
+        if copy || tab.saved.get_untracked().is_none() {
+            self.dialog.set(Dialog::Save {
+                id: tab.id,
+                copy,
+                close: false,
+            });
+        } else {
+            self.save_to(
+                tab,
+                tab.service.get_untracked(),
+                tab.draft.get_untracked().name,
+                false,
+                false,
+            );
+        }
     }
 
     pub fn save_and_close(self, tab: RequestTab) {
-        self.save_then(tab, false, true);
+        if tab.saved.get_untracked().is_none() {
+            self.dialog.set(Dialog::Save {
+                id: tab.id,
+                copy: false,
+                close: true,
+            });
+        } else {
+            self.save_to(
+                tab,
+                tab.service.get_untracked(),
+                tab.draft.get_untracked().name,
+                false,
+                true,
+            );
+        }
     }
 
-    fn save_then(self, tab: RequestTab, copy: bool, close: bool) {
+    pub fn save_to(
+        self,
+        tab: RequestTab,
+        destination: Service,
+        name: String,
+        copy: bool,
+        close: bool,
+    ) {
         if !self.saving.with(|ids| ids.insert(tab.id)) {
             return;
         }
-        let saved = if copy {
+        let saved = if copy || destination.id != tab.service.get_untracked().id {
             None
         } else {
             tab.saved.get_untracked()
         };
-        let service = tab.service.with(|s| s.id.clone());
+        let service = destination.id.clone();
+        tab.draft.update(|d| d.name = name);
         let input = tab.draft.get_untracked();
         self.task(async move {
             let result = self
@@ -330,6 +562,10 @@ impl Workbench {
                         request: saved.request,
                     });
                     tab.saved.set(Some((saved.id, saved.revision)));
+                    if tab.service.get_untracked().id != destination.id { tab.environment.set(None); }
+                    tab.service.set(destination);
+                    if self.active.get_untracked() == tab.id { self.activate(tab); }
+                    if matches!(self.dialog.get_untracked(), Dialog::Save { id, .. } if id == tab.id) { self.dialog.set(Dialog::None); }
                     self.notice.set(format!("已保存 · 修订 {}", saved.revision));
                     if service == self.selected_service.get_untracked() {
                         self.reload_service();
@@ -395,7 +631,8 @@ impl Workbench {
         let environment = tab.environment.get_untracked();
         let service = tab.service.with(|s| s.clone());
         let history = HistoryEntry {
-            id: self.id(),
+            id: uuid::Uuid::new_v4().to_string(),
+            completed_at: 0,
             service: service.clone(),
             input: input.clone(),
             environment: environment.clone(),
@@ -406,6 +643,7 @@ impl Workbench {
             message: "正在发送…".into(),
             ..Default::default()
         });
+        tab.response_view.selected.set(None);
         tab.content_version.update(|v| *v += 1);
         self.running.with(|r| {
             r.insert(
@@ -447,9 +685,11 @@ impl Workbench {
                     self.notice.set("请求已发送".into());
                 }
                 Err(e) => {
-                    self.running.with(|r| {
-                        r.remove(&tab.id);
-                    });
+                    let failed = self.running.with(|r| r.remove(&tab.id));
+                    if let Some(mut failed) = failed {
+                        failed.history.summary = e.to_string();
+                        self.record_history(failed.history);
+                    }
                     tab.response.update(|r| {
                         r.running = false;
                         r.message = e.to_string();
@@ -568,16 +808,16 @@ impl Workbench {
             }
             for id in completed {
                 if let Some(request) = running.remove(&id) {
-                    self.history.update(|history| {
-                        history.insert(0, request.history);
-                        history.truncate(50);
-                    });
+                    self.record_history(request.history);
                 }
             }
         });
     }
 
-    pub fn create_service(self, input: ServiceInput) {
+    pub fn create_service(self, mut input: ServiceInput) {
+        if input.slug.trim().is_empty() {
+            input.slug = format!("collection-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+        }
         if self.mutation.with(|v| std::mem::replace(v, true)) {
             return;
         }
@@ -591,11 +831,44 @@ impl Workbench {
                 Ok(service) => {
                     self.catalog.update(|catalog| catalog.push(service.clone()));
                     self.select_service(service.id);
-                    self.new_request();
                     if self.dialog.get_untracked() == Dialog::Service {
                         self.dialog.set(Dialog::None);
                     }
-                    self.notice.set("服务已创建".into());
+                    self.notice.set("集合已创建".into());
+                }
+                Err(e) => self.notice.set(e.to_string()),
+            }
+        });
+    }
+
+    pub fn save_new_collection(
+        self,
+        tab: RequestTab,
+        collection: String,
+        name: String,
+        close: bool,
+        selection: Signal<String>,
+    ) {
+        let mut input = tab.draft.get_untracked();
+        input.name = name.clone();
+        if let Err(e) = apibuddy_core::templates::validate_template(&input) {
+            self.notice.set(e.to_string());
+            return;
+        }
+        if self.mutation.with(|v| std::mem::replace(v, true)) {
+            return;
+        }
+        self.task(async move {
+            let result = self.backend().call::<Service>(Command::Create { input: ServiceInput {
+                name: collection, slug: format!("collection-{}", &uuid::Uuid::new_v4().to_string()[..8]), base_url: String::new(), description: String::new(),
+            }}).await;
+            self.mutation.with(|v| *v = false);
+            match result {
+                Ok(service) => {
+                    self.catalog.update(|c| c.push(service.clone()));
+                    // Retain the new destination if saving the request needs correction/retry.
+                    if matches!(self.dialog.get_untracked(), Dialog::Save { id, .. } if id == tab.id) { selection.set(service.id.clone()); }
+                    self.save_to(tab, service, name, true, close);
                 }
                 Err(e) => self.notice.set(e.to_string()),
             }
@@ -606,7 +879,10 @@ impl Workbench {
         if self.mutation.with(|v| std::mem::replace(v, true)) {
             return;
         }
-        let service = self.selected_service.get_untracked();
+        let service = self
+            .current()
+            .map(|t| t.service.get_untracked().id)
+            .unwrap_or_else(|| self.selected_service.get_untracked());
         self.task(async move {
             let result = self
                 .backend()
@@ -618,7 +894,10 @@ impl Workbench {
             self.mutation.with(|v| *v = false);
             match result {
                 Ok(data) => {
-                    if service == self.selected_service.get_untracked() {
+                    if self
+                        .current()
+                        .is_some_and(|t| t.service.get_untracked().id == service)
+                    {
                         self.environments.set(data);
                     }
                     if self.dialog.get_untracked() == Dialog::Environment {

@@ -1,5 +1,5 @@
 use crate::{
-    dialogs, request,
+    dialogs, request, response,
     state::{Dialog, Workbench},
     ui,
 };
@@ -21,11 +21,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
         ("mod+k", 6),
     ] {
         let options = KeyOptions {
-            when: if action == 0 {
-                nsh_core::keymap::When::Always
-            } else {
-                nsh_core::keymap::When::Auto
-            },
+            when: nsh_core::keymap::When::Always,
             ..Default::default()
         };
         on_key_with(key, options, move |_| {
@@ -51,7 +47,11 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                 }
                 4 => {
                     if let Some(tab) = store.current() {
-                        store.cancel(tab);
+                        if tab.response_view.search_open.get_untracked() {
+                            tab.response_view.search_open.set(false);
+                        } else {
+                            store.cancel(tab);
+                        }
                     }
                 }
                 5 => sidebar.update(|v| *v = !*v),
@@ -71,6 +71,20 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                     t.name.to_lowercase().contains(&query)
                         || t.request.url.to_lowercase().contains(&query)
                         || t.request.method.to_lowercase().contains(&query)
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    });
+    let filtered_history = computed(move || {
+        let query = search.get().to_lowercase();
+        store.history.with(|entries| {
+            entries
+                .iter()
+                .filter(|e| {
+                    e.input.name.to_lowercase().contains(&query)
+                        || e.input.request.url.to_lowercase().contains(&query)
+                        || e.input.request.method.to_lowercase().contains(&query)
                 })
                 .cloned()
                 .collect::<Vec<_>>()
@@ -128,16 +142,16 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     view()
                                         .flex_row()
                                         .items_center()
-                                        .child(ui::label("服务集合").flex_1())
+                                        .child(ui::label("Collections").flex_1())
                                         .child(
                                             ui::action("+", move || {
                                                 store.dialog.set(Dialog::Service)
                                             })
-                                            .accessibility_label("新建服务"),
+                                            .accessibility_label("新建集合"),
                                         ),
                                 )
                                 .child(ui::choice(
-                                    "当前服务",
+                                    "当前集合",
                                     move || {
                                         store.catalog.with(|items| {
                                             items
@@ -151,10 +165,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     move || store.selected_service.get(),
                                     move || store.service().name,
                                     move |id| {
-                                        if store.tabs.with_untracked(Vec::len) < 20 {
-                                            store.select_service(id);
-                                            store.new_request();
-                                        } else { store.notice.set("最多打开 20 个请求".into()); }
+                                        store.select_service(id);
                                     },
                                 ))
                                 .child(
@@ -168,7 +179,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                         "搜索名称、URL…  Ctrl+K"
                                     }),
                                 )
-                                .child(ui::tabs(&["集合", "历史"], navigation)),
+                                .child(ui::tabs(&["Collections", "History"], navigation)),
                         )
                         .child(dynamic(move || {
                             if navigation.get() == 0 {
@@ -257,7 +268,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     .into_element()
                             } else {
                                 virtual_list(
-                                    move || store.history.with(Vec::len),
+                                    move || filtered_history.with(Vec::len),
                                     move |at| {
                                         button()
                                             .h(px(66.0))
@@ -266,8 +277,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                             .justify_center()
                                             .hover(|s| s.bg(|| theme().accent))
                                             .on_press(move || {
-                                                if let Some(entry) = store
-                                                    .history
+                                                if let Some(entry) = filtered_history
                                                     .with_untracked(|h| h.get(at.index()).cloned())
                                                 {
                                                     store.open(
@@ -280,13 +290,13 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                             })
                                             .child(
                                                 ui::label(move || {
-                                                    store.history.with(|h| {
+                                                    filtered_history.with(|h| {
                                                         h.get(at.index())
                                                             .map(|e| {
                                                                 format!(
                                                                     "{} {}",
                                                                     e.input.request.method,
-                                                                    e.input.name
+                                                                    e.input.request.url
                                                                 )
                                                             })
                                                             .unwrap_or_default()
@@ -296,7 +306,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                             )
                                             .child(
                                                 ui::muted(move || {
-                                                    store.history.with(|h| {
+                                                    filtered_history.with(|h| {
                                                         h.get(at.index())
                                                             .map(|e| e.summary.clone())
                                                             .unwrap_or_default()
@@ -311,7 +321,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                 .flex_1()
                                 .empty(
                                     view().p_4().child(ui::muted(
-                                        "本次会话最近 50 次请求；点击可重新编辑。",
+                                        "本机最近 50 次请求；点击可重新编辑。",
                                     )),
                                 )
                                 .into_element()
@@ -414,7 +424,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                                     .flex_1().min_h(px(0.0))
                                     .handle_class("h-px bg-border group-hover:bg-primary group-active:bg-primary")
                                     .child(nsh_base::resizable_panel().min_size(px(260.0)).child(request::request_editor(store, tab)))
-                                    .child(nsh_base::resizable_panel().min_size(px(170.0)).child(request::response_view(store, tab)))
+                                    .child(nsh_base::resizable_panel().min_size(px(280.0)).child(response::response_view(store, tab)))
                                     .into_element(),
                                 None => view().into_element(),
                             }
@@ -437,6 +447,7 @@ pub fn workbench(store: Workbench) -> impl IntoElement {
                         .number_of_lines(1)
                         .text_size(px(11.0)),
                 )
+                .child(ui::muted(move || store.recovery_status.get()).max_w(px(320.0)).number_of_lines(1).text_size(px(11.0)))
                 .child(ui::muted(if crate::backend::mac_shortcuts() {
                     "⌘↵ 发送   ⌘S 保存   ⌘T 新建"
                 } else {

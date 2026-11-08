@@ -157,3 +157,47 @@ fn response_limit_keeps_partial_body() {
     assert_eq!(response.body.len(), MAX_RESPONSE_BYTES);
     assert!(matches!(response.outcome, Outcome::Failed(_)));
 }
+
+#[test]
+fn interrupted_response_keeps_partial_utf8_in_both_modes() {
+    for stream_mode in [true, false] {
+        let mut draft = new_template().request;
+        draft.stream = stream_mode;
+        draft.url = server(|stream| {
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n")
+                .unwrap();
+            stream.write_all("中文片段".as_bytes()).unwrap();
+            stream.write_all(&[0xf0, 0x9f]).unwrap();
+            stream.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(30));
+        });
+        let response = Engine::new()
+            .send_blocking(resolve_request(&draft, true).unwrap())
+            .unwrap();
+        assert_eq!(response.status, Some(200));
+        assert_eq!(response.body, "中文片段�");
+        assert_eq!(response.bytes, "中文片段".len() + 2);
+        assert!(
+            matches!(response.outcome, Outcome::Failed(ref message) if message.contains("响应读取中断"))
+        );
+    }
+}
+
+#[test]
+fn refused_connection_explains_failure_without_echoing_request_secrets() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let mut draft = new_template().request;
+    draft.url = format!("http://{address}/private-path?token=fixture-secret");
+    let response = Engine::new()
+        .send_blocking(resolve_request(&draft, true).unwrap())
+        .unwrap();
+    assert!(response.status.is_none());
+    let Outcome::Failed(message) = response.outcome else {
+        panic!("expected connection failure")
+    };
+    assert!(message.contains("连接被拒绝"), "{message}");
+    assert!(!message.contains("private-path") && !message.contains("fixture-secret"));
+}

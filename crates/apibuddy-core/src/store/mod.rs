@@ -1,4 +1,6 @@
 mod atomic;
+mod desktop;
+pub use desktop::DesktopStore;
 mod environments;
 mod services;
 mod templates;

@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Build, install and reopen the macOS development apps at stable Dock paths."""
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import plistlib
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from urllib.parse import unquote, urlparse
+
+ROOT = Path(__file__).resolve().parent
+LSREGISTER = Path("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+
+
+def run(*args, **kwargs):
+    return subprocess.run([str(arg) for arg in args], cwd=ROOT, check=True, **kwargs)
+
+
+def quit_installed(bundle):
+    # Match the exact installation, never another build with the same executable.
+    script = r'''
+ObjC.import("AppKit");
+function run(argv) {
+    var apps = $.NSWorkspace.sharedWorkspace.runningApplications;
+    var pids = [];
+    for (var i = 0; i < apps.count; i++) {
+        var app = apps.objectAtIndex(i);
+        var url = app.bundleURL;
+        if (url && ObjC.unwrap(url.path) === argv[0]) {
+            pids.push(app.processIdentifier);
+            app.terminate;
+        }
+    }
+    return JSON.stringify(pids);
+}
+'''
+    result = run("/usr/bin/osascript", "-l", "JavaScript", "-e", script, bundle, capture_output=True, text=True)
+    remaining = json.loads(result.stdout)
+    # NSWorkspace caches its application list; observe process exit directly.
+    for _ in range(100):
+        alive = []
+        for pid in remaining:
+            try:
+                os.kill(pid, 0)
+                alive.append(pid)
+            except ProcessLookupError:
+                pass
+        if not alive:
+            return
+        remaining = alive
+        time.sleep(0.1)
+    raise RuntimeError("开发版尚未退出，请先保存并关闭窗口后重试。")
+
+
+def pin_to_dock(bundle, name, identifier):
+    result = run("/usr/bin/defaults", "export", "com.apple.dock", "-", capture_output=True)
+    dock = plistlib.loads(result.stdout)
+    for item in dock.get("persistent-apps", []):
+        data = item.get("tile-data", {})
+        url = data.get("file-data", {}).get("_CFURLString", "")
+        path = unquote(urlparse(url).path) if url.startswith("file:") else url
+        if path and Path(path).resolve() == bundle.resolve():
+            return False
+    tile = {
+        "tile-data": {
+            "file-data": {"_CFURLString": bundle.as_uri() + "/", "_CFURLStringType": 15},
+            "file-label": name,
+            "bundle-identifier": identifier,
+            "file-type": 41,
+        },
+        "tile-type": "file-tile",
+    }
+    # Append one entry through defaults, preserving other icons and preferences.
+    xml = plistlib.dumps(tile).decode()
+    run("/usr/bin/defaults", "write", "com.apple.dock", "persistent-apps", "-array-add", xml)
+    return True
+
+
+def prepare(variant, profile, temporary, data):
+    name = "ApiBuddy" if variant == "native" else "ApiBuddy WebView"
+    dev_name = name + " Dev"
+    run(sys.executable, ROOT / "scripts/package-macos.py", profile, variant)
+    bundle = temporary / (dev_name + ".app")
+    shutil.copytree(ROOT / "dist" / (name + ".app"), bundle)
+    info_path = bundle / "Contents/Info.plist"
+    with info_path.open("rb") as stream:
+        info = plistlib.load(stream)
+    info["CFBundleName"] = info["CFBundleDisplayName"] = dev_name
+    info["CFBundleIdentifier"] += ".dev"
+    info["CFBundleVersion"] = str(time.time_ns())
+    # Finder/Dock launches do not inherit the terminal's environment.
+    info["LSEnvironment"] = {"APIBUDDY_DIR": str(data)}
+    with info_path.open("wb") as stream:
+        plistlib.dump(info, stream)
+    return bundle, dev_name, info["CFBundleIdentifier"]
+
+
+def install(staged, destination, identifier, temporary):
+    if destination.is_symlink():
+        raise RuntimeError(f"拒绝覆盖符号链接：{destination}")
+    if destination.exists():
+        with (destination / "Contents/Info.plist").open("rb") as stream:
+            previous = plistlib.load(stream)
+        if previous.get("CFBundleIdentifier") != identifier:
+            raise RuntimeError(f"目标不是本项目的开发版，未覆盖：{destination}")
+    quit_installed(destination)
+    backup = temporary / (destination.name + ".previous")
+    if destination.exists():
+        shutil.move(str(destination), backup)
+    try:
+        shutil.move(str(staged), destination)
+    except Exception:
+        if destination.exists():
+            shutil.rmtree(destination)
+        if backup.exists():
+            shutil.move(str(backup), destination)
+        raise
+    run(LSREGISTER, "-f", destination)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="构建、更新 ~/Applications 中的开发版，固定到 Dock 并重启。重启前请保存草稿。")
+    parser.add_argument("variant", nargs="?", choices=["native", "webview", "both"], default="native")
+    parser.add_argument("--release", action="store_true", help="使用 release 构建；默认 debug，便于增量开发")
+    parser.add_argument("--data-dir", type=Path, default=Path.home() / ".apibuddy-dev", help="两版共享的开发数据目录，会写入应用包供 Dock 启动使用")
+    args = parser.parse_args()
+    if sys.platform != "darwin":
+        parser.error("此命令只用于 macOS；其他平台请使用 README 中的 cargo 命令")
+    data = args.data_dir.expanduser().resolve()
+    profile = "release" if args.release else "debug"
+    variants = ["native", "webview"] if args.variant == "both" else [args.variant]
+    applications = Path.home() / "Applications"
+    applications.mkdir(exist_ok=True)
+    # Serialize rebuild/restart operations, including different worktrees.
+    lock_path = Path(tempfile.gettempdir()) / f"apibuddy-dev-{os.getuid()}.lock"
+    with lock_path.open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise RuntimeError("另一个 ApiBuddy 开发构建正在运行。") from None
+        print(f"构建 {', '.join(variants)} ({profile})；开发数据：{data}", flush=True)
+        # Complete every requested build before touching installed/running apps.
+        for variant in variants:
+            if variant == "native":
+                command = ["cargo", "build", "--locked", "-p", "apibuddy-app"]
+                if args.release:
+                    command.append("--release")
+                run(*command)
+            else:
+                run(sys.executable, ROOT / "scripts/build-webview.py", "--profile", profile)
+        with tempfile.TemporaryDirectory(prefix="apibuddy-dev-install-") as directory:
+            temporary = Path(directory)
+            prepared = [prepare(v, profile, temporary, data) for v in variants]
+            installed = []
+            changed = False
+            for staged, name, identifier in prepared:
+                destination = applications / staged.name
+                install(staged, destination, identifier, temporary)
+                changed = pin_to_dock(destination, name, identifier) or changed
+                installed.append(destination)
+            if changed:
+                subprocess.run(["/usr/bin/killall", "-u", str(os.getuid()), "Dock"], check=False)
+            for destination in installed:
+                run("/usr/bin/open", destination)
+                print(f"已更新并打开：{destination}", flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        raise SystemExit(f"开发构建失败：{error}") from error

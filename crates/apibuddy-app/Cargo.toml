@@ -13,7 +13,10 @@ default = []
 cli-integration = []
 
 [dependencies]
-apibuddy-core.workspace = true
+regex.workspace = true
+url.workspace = true
+# NSH 0.4's watcher discovers explicit path dependencies, not workspace inheritance.
+apibuddy-core = { path = "../apibuddy-core" }
 nsh-core.workspace = true
 nsh-base.workspace = true
 serde_json.workspace = true

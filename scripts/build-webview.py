@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build the shared NSH Rust UI for the desktop WebView, then build its native host."""
+import argparse
 import json
 import os
 from pathlib import Path
@@ -7,6 +8,10 @@ import sys
 import shutil
 import tempfile
 import subprocess
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--profile", choices=["debug", "release"], default="release", help="Native host profile; the NSH Web package remains optimized")
+args = parser.parse_args()
 
 root = Path(__file__).resolve().parent.parent
 env = os.environ.copy()
@@ -50,5 +55,8 @@ with tempfile.TemporaryDirectory(prefix="apibuddy-web-package-") as temporary:
     if len(pages) != 1:
         raise SystemExit("NSH did not produce exactly one packaged app")
     shutil.copytree(pages[0].parent, root / "dist/web", dirs_exist_ok=True)
-run("cargo", "build", "--locked", "--release", "-p", "apibuddy-webview")
-print(f"WebView executable: {target / 'release/apibuddy-webview'}")
+command = ["cargo", "build", "--locked", "-p", "apibuddy-webview"]
+if args.profile == "release":
+    command.append("--release")
+run(*command)
+print(f"WebView executable: {target / args.profile / 'apibuddy-webview'}")
